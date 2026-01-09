@@ -1,17 +1,76 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
-import React from 'react';
+import { Alert, Image, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
 import appFonts from '../styles/appFonts';
-import BaseButton from '../components/BaseButton';
+
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithCredential,
+} from '@react-native-firebase/auth';
+import { getApp } from '@react-native-firebase/app';
+import { BaseButton, BaseLoader } from '../components';
+
+GoogleSignin.configure({
+  webClientId:
+    '256795844408-rno5v64mq2ildd7fo9jm78gok2pvk25q.apps.googleusercontent.com',
+});
 
 const LoginScreen = () => {
-  function loginHandler() {}
+  const [isLoading, setIsLoading] = useState(false);
+
+  function loginHandler() {
+    setIsLoading(true);
+    GoogleSignin.signIn()
+      .then(async res => {
+        console.log({ res });
+        // Check if your device supports Google Play
+        await GoogleSignin.hasPlayServices({
+          showPlayServicesUpdateDialog: true,
+        });
+
+        // Get the users ID token
+        const signInResult = await GoogleSignin.signIn();
+        console.log({ signInResult });
+
+        if (signInResult.type === 'cancelled') {
+          throw new Error('Sign in process cancelled');
+        }
+
+        const idToken = signInResult.data?.idToken;
+        if (!idToken) {
+          throw new Error('No ID token found');
+        }
+
+        // Create a Google credential with the token
+        const googleCredential = GoogleAuthProvider.credential(
+          signInResult.data?.idToken,
+        );
+
+        // Sign-in the user with the credential
+        const result = await signInWithCredential(
+          getAuth(getApp()),
+          googleCredential,
+        );
+        console.log({ result });
+
+      })
+      .catch(er => {
+        console.log({ er });
+        Alert.alert('Login Error', er.toString());
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }
 
   return (
     <View style={styles.container}>
+      {isLoading && <BaseLoader />}
       <View style={styles.contentContainer}>
         <Image
           source={require('../assets/images/app_logo.png')}
