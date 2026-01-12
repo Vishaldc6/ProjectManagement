@@ -5,15 +5,21 @@ import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
-import appFonts from '../styles/appFonts';
-
 import {
   getAuth,
   GoogleAuthProvider,
   signInWithCredential,
 } from '@react-native-firebase/auth';
-import { getApp } from '@react-native-firebase/app';
+
+import appFonts from '../styles/appFonts';
+import { setUser } from '../redux/slices/AuthSlice';
+import { useAppDispatch } from '../hooks/reduxHooks';
+import { addUser, getUser } from '../firebase/userCollection';
 import { BaseButton, BaseLoader } from '../components';
+import { UserType } from '../types/appTypes';
+import { firebaseApp } from '../firebase';
+import { useAppNavigation } from '../hooks/useAppNavigation';
+import appColors from '../styles/appColors';
 
 GoogleSignin.configure({
   webClientId:
@@ -21,6 +27,10 @@ GoogleSignin.configure({
 });
 
 const LoginScreen = () => {
+  const dispatch = useAppDispatch();
+
+  const navigation = useAppNavigation('Login');
+
   const [isLoading, setIsLoading] = useState(false);
 
   function loginHandler() {
@@ -29,35 +39,56 @@ const LoginScreen = () => {
       .then(async res => {
         console.log({ res });
         // Check if your device supports Google Play
-        await GoogleSignin.hasPlayServices({
+        const hasService = await GoogleSignin.hasPlayServices({
           showPlayServicesUpdateDialog: true,
         });
+        if (hasService) {
+          // Get the users ID token
+          const signInResult = await GoogleSignin.signIn();
+          console.log({ signInResult });
 
-        // Get the users ID token
-        const signInResult = await GoogleSignin.signIn();
-        console.log({ signInResult });
+          if (signInResult.type === 'cancelled') {
+            throw new Error('Sign in process cancelled');
+          }
 
-        if (signInResult.type === 'cancelled') {
-          throw new Error('Sign in process cancelled');
+          // Create a Google credential with the token
+          const googleCredential = GoogleAuthProvider.credential(
+            signInResult.data?.idToken,
+          );
+
+          // Sign-in the user with the credential
+          const signedUser = await signInWithCredential(
+            getAuth(firebaseApp),
+            googleCredential,
+          );
+
+          if (signedUser.additionalUserInfo?.isNewUser) {
+            const userData: UserType = {
+              id: signedUser.user.uid,
+              name: signedUser.user.displayName ?? '',
+              email: signedUser.user.email ?? '',
+              role: 'Developer',
+            };
+
+            await addUser(signedUser.user.uid, userData);
+          }
+
+          const user = await getUser(signedUser.user.uid);
+          dispatch(setUser(user));
+
+          // navigate based on user role
+          //
+          //
+          navigation.reset({
+            routes: [
+              {
+                name: 'Drawer',
+              },
+            ],
+          });
+        } else {
+          throw Error('Your device dont have play service');
         }
-
-        const idToken = signInResult.data?.idToken;
-        if (!idToken) {
-          throw new Error('No ID token found');
-        }
-
-        // Create a Google credential with the token
-        const googleCredential = GoogleAuthProvider.credential(
-          signInResult.data?.idToken,
-        );
-
-        // Sign-in the user with the credential
-        const result = await signInWithCredential(
-          getAuth(getApp()),
-          googleCredential,
-        );
-        console.log({ result });
-
       })
       .catch(er => {
         console.log({ er });
@@ -99,6 +130,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
+    backgroundColor: appColors.SECONDARY_BACKGROUND,
   },
   contentContainer: {
     flex: 1,

@@ -1,24 +1,41 @@
 import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import LoginScreen from '../screens/LoginScreen';
-import DrawerNavigator from './DrawerNavigator';
-import { NavigationContainer } from '@react-navigation/native';
-import { store } from '../redux/store';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { getAuth, onAuthStateChanged } from '@react-native-firebase/auth';
-import { setUser } from '../redux/slices/AuthSlice';
 
-const Stack = createNativeStackNavigator();
+import DrawerNavigator from './DrawerNavigator';
+import { store } from '../redux/store';
+import { setUser } from '../redux/slices/AuthSlice';
+import LoginScreen from '../screens/LoginScreen';
+import appColors from '../styles/appColors';
+import { RootStackNavigatorType } from '../types/navigationTypes';
+import { getUser } from '../firebase/userCollection';
+
+const Stack = createNativeStackNavigator<RootStackNavigatorType>();
+
+const NavigationTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: appColors.PRIMARY_BACKGROUND,
+    primary: appColors.PRIMARY,
+  },
+};
 
 const RootNavigator = () => {
-
   const [initializing, setInitializing] = useState(true);
-  const [initialRouteName, setInitialRouteName] = useState<string>('Login');
-  
+  const [initialRouteName, setInitialRouteName] =
+    useState<keyof RootStackNavigatorType>('Login');
+
   useEffect(() => {
     const subscriber = onAuthStateChanged(getAuth(), user => {
-      store.dispatch(setUser(user));
+      if (user) {
+        getUser(user.uid).then(_user => {
+          store.dispatch(setUser(_user));
+        });
+        setInitialRouteName('Drawer');
+      }
       if (initializing) setInitializing(false);
-      setInitialRouteName('Drawer');
     });
     return subscriber;
   }, []);
@@ -26,7 +43,7 @@ const RootNavigator = () => {
   if (initializing) return null;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={NavigationTheme}>
       <Stack.Navigator
         initialRouteName={initialRouteName}
         screenOptions={{

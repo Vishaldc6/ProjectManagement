@@ -1,22 +1,29 @@
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import React from 'react';
-import {
-  HomeScreen as AdminHomeScreen,
-  MemberListScreen,
-} from '../screens/admin';
+import React, { useEffect, useState } from 'react';
 
-const Drawer = createDrawerNavigator();
+import { MemberListScreen } from '../screens/admin';
+import ProjectStackNavigator from './ProjectStackNavigator';
+import { DrawerNavigatorType } from '../types/navigationTypes';
+import { useAppSelector } from '../hooks/reduxHooks';
+import DrawerContainer from './component/DrawerContainer';
+
+const Drawer = createDrawerNavigator<DrawerNavigatorType>();
 
 const DrawerNavigator = () => {
+  const { user } = useAppSelector(state => state.AuthReducer);
+
+  const [initialRouteName, setInitialRouteName] =
+    useState<keyof DrawerNavigatorType>('ProjectStack');
+
+  // set initial screen based on user role: admin or member
   return (
     <Drawer.Navigator
-      screenOptions={{
-        headerShown: false,
-      }}
+      initialRouteName={initialRouteName}
+      drawerContent={props => <DrawerContainer {...props} />}
     >
-      <Drawer.Screen name="home" component={AdminHomeScreen} />
-      {/* <Drawer.Screen name="ProjectStack" component={ProjectStackNavigator} /> */}
-      <Drawer.Screen name="MemberList" component={MemberListScreen} />
+      <Drawer.Screen name="ProjectStack" component={ProjectStackNavigator} />
+      <Drawer.Screen name="Member" component={MemberListScreen} />
+      {/* tasks stack*/}
     </Drawer.Navigator>
   );
 };
