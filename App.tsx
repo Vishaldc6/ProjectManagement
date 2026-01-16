@@ -5,7 +5,13 @@
  * @format
  */
 
-import { LogBox, StatusBar, StyleSheet, useColorScheme } from 'react-native';
+import {
+  Alert,
+  LogBox,
+  StatusBar,
+  StyleSheet,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import BootSplash from 'react-native-bootsplash';
@@ -14,6 +20,10 @@ import { PersistGate } from 'redux-persist/integration/react';
 
 import { persistor, store } from './src/redux/store';
 import RootNavigator from './src/navigations/RootNavigator';
+
+import Config from 'react-native-config';
+
+console.log('Config : ', { Config, e: Config.SUPABASE_ANON_KEY });
 
 LogBox.ignoreAllLogs();
 

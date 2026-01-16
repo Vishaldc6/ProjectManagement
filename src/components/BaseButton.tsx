@@ -15,7 +15,11 @@ interface BaseButtonPropType {
 
 const BaseButton = (props: BaseButtonPropType & TouchableOpacityProps) => {
   return (
-    <TouchableOpacity {...props} style={[styles.btnContainer, props.style]}>
+    <TouchableOpacity
+      activeOpacity={0.8}
+      {...props}
+      style={[styles.btnContainer, props.style]}
+    >
       <Text style={styles.title}>{props.title}</Text>
     </TouchableOpacity>
   );

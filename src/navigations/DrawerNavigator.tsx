@@ -6,6 +6,10 @@ import ProjectStackNavigator from './ProjectStackNavigator';
 import { DrawerNavigatorType } from '../types/navigationTypes';
 import { useAppSelector } from '../hooks/reduxHooks';
 import DrawerContainer from './component/DrawerContainer';
+import TaskStackNavigator from './TaskStackNavigator';
+import { requestUserPermission } from '../utils/helperFunctions';
+import { messagingApp } from '../firebase';
+import { updateUser } from '../firebase/userCollection';
 
 const Drawer = createDrawerNavigator<DrawerNavigatorType>();
 
@@ -15,15 +19,54 @@ const DrawerNavigator = () => {
   const [initialRouteName, setInitialRouteName] =
     useState<keyof DrawerNavigatorType>('ProjectStack');
 
-  // set initial screen based on user role: admin or member
+  useEffect(() => {
+    requestUserPermission()
+      .then(async () => {
+        const token = await messagingApp.getToken();
+        console.log({ token });
+        saveTokenToDatabase(token);
+      })
+      .catch(err => {
+        console.log({ err });
+      });
+  }, []);
+
+  const saveTokenToDatabase = async (token: string) => {
+    await updateUser(user?.id ?? '', { fcm_token: [token] });
+  };
+
   return (
     <Drawer.Navigator
       initialRouteName={initialRouteName}
+      screenOptions={{ popToTopOnBlur: true }}
       drawerContent={props => <DrawerContainer {...props} />}
     >
-      <Drawer.Screen name="ProjectStack" component={ProjectStackNavigator} />
-      <Drawer.Screen name="Member" component={MemberListScreen} />
-      {/* tasks stack*/}
+      <Drawer.Screen
+        name="ProjectStack"
+        options={{
+          drawerLabel: 'Projects',
+          title: 'Projects',
+        }}
+        component={ProjectStackNavigator}
+      />
+      <Drawer.Screen
+        name="TaskStack"
+        options={{
+          drawerLabel: 'Tasks',
+          title: 'Tasks',
+        }}
+        component={TaskStackNavigator}
+      />
+      {user?.role === 'Admin' && (
+        <Drawer.Screen
+          name="Member"
+          options={{
+            drawerLabel: 'Members',
+            title: 'Members',
+          }}
+          component={MemberListScreen}
+        />
+      )}
     </Drawer.Navigator>
   );
 };

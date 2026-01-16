@@ -1,0 +1,391 @@
+import {
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  widthPercentageToDP as wp,
+  heightPercentageToDP as hp,
+  widthPercentageToDP,
+} from 'react-native-responsive-screen';
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
+import { RichEditor } from 'react-native-pell-rich-editor';
+import ImageView from 'react-native-image-viewing';
+
+import { useAppRoutes } from '../hooks/useAppRoute';
+import {
+  addComment,
+  getTask,
+  tasksCommentsRef,
+} from '../firebase/taskCollection';
+import { CommentType, TaskType } from '../types/appTypes';
+import appColors from '../styles/appColors';
+import {
+  BaseButton,
+  BaseHtmlText,
+  BaseIcon,
+  BaseLoader,
+  BaseRichTextInput,
+} from '../components';
+import {
+  sendNotification,
+  timestampToDate,
+  toCapitalize,
+} from '../utils/helperFunctions';
+import appFonts from '../styles/appFonts';
+import { useAppSelector } from '../hooks/reduxHooks';
+import { useAppNavigation } from '../hooks/useAppNavigation';
+import { uploadFilesToSupabase } from '../supabase';
+import { UploadFileType } from '../components/BaseRichTextInput';
+
+const TaskDetailScreen = () => {
+  const navigation = useAppNavigation('TaskDetail');
+
+  const { user } = useAppSelector(state => state.AuthReducer);
+  const { params } = useAppRoutes<'TaskDetail'>();
+
+  const richTextRef = useRef<RichEditor>(null);
+  const [comment, setComment] = useState('');
+  const [files, setFiles] = useState<UploadFileType[]>([]);
+  const [modelVisible, setModelVisible] = useState(false);
+  const [task, setTask] = useState<TaskType>();
+  const [comments, setComments] = useState<CommentType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddCmtLoading, setIsAddCmtLoading] = useState(false);
+  const [viewImage, setViewImage] = useState(false);
+
+  const IS_ADMIN = user?.role === 'Admin';
+
+  useFocusEffect(
+    useCallback(() => {
+      getTask(params.id)
+        .then(res => {
+          setTask(res);
+          setIsLoading(false);
+        })
+        .catch(er => {
+          console.log({ er });
+        });
+    }, []),
+  );
+
+  useEffect(() => {
+    const q = query(
+      tasksCommentsRef,
+      where('task_id', '==', params.id),
+      orderBy('created_at', 'desc'),
+    );
+
+    const unsubscribe = onSnapshot(q, querySnapshot => {
+      const commentList: CommentType[] = [];
+      querySnapshot.forEach((doc: any) => commentList.push(doc.data()));
+      setComments(commentList);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const taskIconTextColor =
+    task?.task_status === 'DONE'
+      ? appColors.TASK_DONE
+      : task?.task_status === 'IN-PROGRESS'
+      ? appColors.TASK_IN_PROGRESS
+      : appColors.TASK_TODO;
+
+  const statusBgColor =
+    task?.task_status === 'DONE'
+      ? appColors.TASK_DONE_BG
+      : task?.task_status === 'IN-PROGRESS'
+      ? appColors.TASK_IN_PROGRESS_BG
+      : appColors.TASK_TODO_BG;
+
+  const handleAddComment = async () => {
+    setIsAddCmtLoading(true);
+    const commentData: Partial<CommentType> = {
+      task_id: task?.id,
+      author: user?.name,
+      author_id: user?.id,
+      message: comment,
+    };
+    if (files.length) {
+      const urlList = await uploadFilesToSupabase(files);
+      commentData.file_url = urlList;
+    }
+    
+    addComment(commentData)
+      .then(() => {
+        sendNotification({
+          body: `Comment for Task: ${task?.title}`,
+          data: {
+            task_id: task?.id,
+          },
+          title: 'New Comment',
+          user_id: IS_ADMIN ? task?.assigned_to ?? '' : task?.created_by ?? '',
+        });
+        setIsAddCmtLoading(false);
+        toggleModal();
+        setComment('');
+      })
+      .catch(error => {
+        Alert.alert('Add Comment', 'Something went wrong');
+        setIsAddCmtLoading(false);
+        toggleModal();
+        setComment('');
+      });
+  };
+
+  const toggleModal = () => setModelVisible(!modelVisible);
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      {isLoading ? (
+        <BaseLoader />
+      ) : !task ? (
+        <Text>{'Task not found'}</Text>
+      ) : (
+        <>
+          <View style={styles.statusHeaderContainer}>
+            <Text
+              style={[
+                styles.taskStatus,
+                { color: taskIconTextColor, backgroundColor: statusBgColor },
+              ]}
+            >
+              {task?.task_status && toCapitalize(task?.task_status)}
+            </Text>
+            {!IS_ADMIN && (
+              <Text
+                style={styles.linkText}
+                onPress={() => {
+                  navigation.navigate('TaskForm', {
+                    task: task,
+                    projectId: task?.project_id,
+                  });
+                }}
+              >
+                {'Update Status'}
+                {/* {IS_ADMIN ? 'Edit' : 'Update Status'} */}
+              </Text>
+            )}
+          </View>
+          <Text style={styles.taskTitle}>{task?.title}</Text>
+          <View style={styles.projectRow}>
+            <BaseIcon name="FolderOpen" color={appColors.SECONDARY_TEXT} />
+            <Text style={styles.projectTitle}>{task?.project_title}</Text>
+          </View>
+
+          <View style={styles.descriptionContainer}>
+            <Text style={styles.fieldHeader}>{'Description'}</Text>
+            <BaseHtmlText html={task?.description ?? ''} />
+            {task?.file_url?.length && (
+              <Pressable onPress={() => setViewImage(true)}>
+                <Image
+                  source={{
+                    uri: task?.file_url[0],
+                    width: widthPercentageToDP(20),
+                    height: widthPercentageToDP(20),
+                  }}
+                />
+              </Pressable>
+            )}
+            {task?.file_url?.length && (
+              <ImageView
+                images={task?.file_url.map(uri => ({ uri }))}
+                imageIndex={0}
+                visible={viewImage}
+                onRequestClose={() => setViewImage(false)}
+              />
+            )}
+          </View>
+
+          <Text style={styles.fieldHeader}>
+            {'Assigned to '}
+            <Text style={styles.assignMember}>{task?.assigned_member}</Text>
+            {' on '}
+            <Text style={styles.assignMember}>
+              {timestampToDate(task?.created_at)}
+            </Text>
+          </Text>
+
+          <View style={styles.commentHeaderRow}>
+            <Text style={styles.fieldHeader}>{'Comments'}</Text>
+            <Text style={styles.linkText} onPress={toggleModal}>
+              {'+ Add Comment'}
+            </Text>
+          </View>
+          {(comments?.length ?? 0) > 0 ? (
+            comments.map(comment => (
+              <View
+                style={[
+                  styles.commentBox,
+                  user?.id === comment.author_id && {
+                    borderColor: appColors.PRIMARY,
+                  },
+                ]}
+              >
+                <Text style={styles.authorName}>{comment.author}</Text>
+                <BaseHtmlText html={comment.message} />
+                {comment.file_url?.length && (
+                  <Pressable onPress={() => setViewImage(true)}>
+                    <Image
+                      source={{
+                        uri: comment.file_url[0],
+                        width: widthPercentageToDP(20),
+                        height: widthPercentageToDP(20),
+                      }}
+                    />
+                  </Pressable>
+                )}
+                {comment.file_url?.length && (
+                  <ImageView
+                    images={comment.file_url.map(uri => ({ uri }))}
+                    imageIndex={0}
+                    visible={viewImage}
+                    onRequestClose={() => setViewImage(false)}
+                  />
+                )}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyComments}>{'There are no comments'}</Text>
+          )}
+        </>
+      )}
+      <Modal
+        animationType="slide"
+        backdropColor={appColors.LOADER_BACKGROUND}
+        visible={modelVisible}
+        onRequestClose={toggleModal}
+        statusBarTranslucent
+      >
+        <View style={styles.modalView}>
+          <View style={styles.modalContentView}>
+            {isAddCmtLoading && <BaseLoader />}
+            <BaseIcon name="X" style={styles.closeIcon} onPress={toggleModal} />
+            <Text style={styles.modalTitle}>{'Add Comment'}</Text>
+            <BaseRichTextInput
+              ref={richTextRef}
+              initialContentHTML={comment}
+              title="Comment"
+              onChange={text => setComment(text)}
+              placeholder="Enter Task Comment"
+              shouldAddFile
+              onFileSelect={res => {
+                res && setFiles([res]);
+              }}
+            />
+            <BaseButton
+              title="Add Comment"
+              onPress={handleAddComment}
+              style={{ width: wp(82), marginTop: hp(2) }}
+              disabled={!comment.trim().length}
+            />
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
+  );
+};
+
+export default TaskDetailScreen;
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    padding: wp(3),
+    gap: hp(1),
+    paddingBottom: hp(5),
+  },
+  statusHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  linkText: {
+    color: appColors.PRIMARY,
+    fontWeight: '500',
+    marginHorizontal: wp(3),
+  },
+  taskStatus: {
+    alignSelf: 'flex-start',
+    padding: wp(1),
+    paddingHorizontal: wp(3),
+    borderRadius: wp(10),
+  },
+  taskTitle: {
+    fontSize: appFonts.FONT_16,
+    fontWeight: '500',
+  },
+  projectRow: {
+    flexDirection: 'row',
+    gap: wp(1.5),
+  },
+  projectTitle: {
+    color: appColors.PRIMARY_TEXT,
+  },
+  descriptionContainer: {
+    backgroundColor: appColors.SECONDARY_BACKGROUND,
+    padding: wp(3),
+    borderRadius: wp(3),
+    elevation: 5,
+    marginVertical: hp(1),
+  },
+  assignMember: {
+    color: appColors.PRIMARY_TEXT,
+  },
+  commentHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  commentBox: {
+    backgroundColor: appColors.SECONDARY_BACKGROUND,
+    padding: wp(2),
+    borderRadius: wp(2),
+    elevation: 3,
+    borderWidth: 1,
+  },
+  authorName: {
+    fontSize: appFonts.FONT_10,
+    color: appColors.SECONDARY_TEXT,
+    fontWeight: '500',
+  },
+  fieldHeader: {
+    color: appColors.SECONDARY_TEXT,
+    fontWeight: 'bold',
+  },
+  emptyComments: { textAlign: 'center', marginVertical: hp(1) },
+  modalView: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  closeIcon: {
+    alignSelf: 'flex-end',
+  },
+  modalContentView: {
+    backgroundColor: appColors.SECONDARY_BACKGROUND,
+    padding: wp(4),
+    margin: wp(4),
+    borderRadius: wp(3),
+    gap: hp(1),
+  },
+  modalTitle: {
+    fontSize: appFonts.FONT_16,
+    fontWeight: '500',
+  },
+  textArea: {
+    height: hp(10),
+    textAlignVertical: 'top',
+  },
+});

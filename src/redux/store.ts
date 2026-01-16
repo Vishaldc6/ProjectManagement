@@ -3,16 +3,12 @@ import {
   configureStore,
   PayloadAction,
 } from '@reduxjs/toolkit';
-
-import AuthSlice from './slices/AuthSlice';
-import {
-  PERSIST,
-  persistReducer,
-  persistStore,
-  REGISTER
-} from 'redux-persist';
+import { PERSIST, persistReducer, persistStore, REGISTER } from 'redux-persist';
 import logger from 'redux-logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import AuthSlice from './slices/AuthSlice';
+import { messagingApp } from '../firebase';
 
 const reducers = combineReducers({
   AuthReducer: AuthSlice,
@@ -26,6 +22,9 @@ const getRootReducers = (
 ) => {
   if (action.type === USER_LOGOUT) {
     AsyncStorage.removeItem('persist:root');
+    messagingApp.unregisterDeviceForRemoteMessages();
+    messagingApp.deleteToken();
+    // remove token from db too
     return reducers(undefined, action); // Reset all reducers to their initial state
   }
   return reducers(state, action);

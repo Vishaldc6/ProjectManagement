@@ -9,7 +9,7 @@ export default {
   SECONDARY_INPUT_BACKGROUND: '#f5f6f7',
 
   PRIMARY_TEXT: '#000000',
-  SECONDARY_TEXT: '#3f3f3fff',
+  SECONDARY_TEXT: '#5f5e5eff',
 
   BORDER: '#8b8b8bff',
   BUTON_TEXT: '#ffffff',
@@ -25,6 +25,26 @@ export default {
   TASK_TODO: '#91a1b5',
   TASK_IN_PROGRESS: '#007ee6',
   TASK_DONE: '#00ba82',
+
+  TASK_TODO_BG: '#91a1b560',
+  TASK_IN_PROGRESS_BG: '#007fe660',
+  TASK_DONE_BG: '#00ba8260',
+
+  MEMBER_ADMIN: '#9239ff',
+  MEMBER_PROJECT_MANAGER: '#007ee6',
+  MEMBER_UI: '#fffb24',
+  MEMBER_QA: '#00ba82',
+  MEMBER_MOB_DEV: '#ff8000',
+  MEMBER_WEB_DEV: '#ff447c',
+  MEMBER_DEV: '#91a1b5',
+
+  MEMBER_ADMIN_BG: '#9239ff60',
+  MEMBER_PROJECT_MANAGER_BG: '#007ee660',
+  MEMBER_UI_BG: '#fffb2460',
+  MEMBER_QA_BG: '#00ba8260',
+  MEMBER_MOB_DEV_BG: '#ff800060',
+  MEMBER_WEB_DEV_BG: '#ff447c60',
+  MEMBER_DEV_BG: '#91a1b560',
 
   ERROR_TEXT: '#ff0000',
   DANGER_TEXT: '#ff0000',

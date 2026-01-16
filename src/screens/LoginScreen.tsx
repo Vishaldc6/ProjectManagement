@@ -10,6 +10,7 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
 } from '@react-native-firebase/auth';
+import { serverTimestamp, Timestamp } from '@react-native-firebase/firestore';
 
 import appFonts from '../styles/appFonts';
 import { setUser } from '../redux/slices/AuthSlice';
@@ -20,6 +21,7 @@ import { UserType } from '../types/appTypes';
 import { firebaseApp } from '../firebase';
 import { useAppNavigation } from '../hooks/useAppNavigation';
 import appColors from '../styles/appColors';
+import { requestUserPermission, setUserRole } from '../utils/helperFunctions';
 
 GoogleSignin.configure({
   webClientId:
@@ -67,7 +69,9 @@ const LoginScreen = () => {
               id: signedUser.user.uid,
               name: signedUser.user.displayName ?? '',
               email: signedUser.user.email ?? '',
-              role: 'Developer',
+              role: setUserRole(signedUser.user.email ?? ''),
+              created_at: serverTimestamp() as Timestamp,
+              updated_at: serverTimestamp() as Timestamp,
             };
 
             await addUser(signedUser.user.uid, userData);
@@ -76,9 +80,6 @@ const LoginScreen = () => {
           const user = await getUser(signedUser.user.uid);
           dispatch(setUser(user));
 
-          // navigate based on user role
-          //
-          //
           navigation.reset({
             routes: [
               {

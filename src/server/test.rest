@@ -1,0 +1,10 @@
+POST http://localhost:3000/send-notification HTTP/1.1
+content-type: application/json
+
+{ 
+    "user_id":"5hPNwZSIdLXZP4VWbwiqbgNBAe93",
+    "token": "fQfWF606Sta7u46_hB3gJs:APA91bGCCYn2ZnRogbz8D_BC2KkBJ3RJHFQN3IBK8ECDchcVONUu8SANNME0DyV5e8J8ll7z_oK6nl5HZirRzYDynbUntybpd4bnsV5C7exnXYDKMBHGdL0", 
+    "title": "title", 
+    "body": "body msg", 
+    "data": {} 
+}

@@ -1,6 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { createRef, useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import {
+  DefaultTheme,
+  NavigationContainer,
+  NavigationContainerRef,
+} from '@react-navigation/native';
 import { getAuth, onAuthStateChanged } from '@react-native-firebase/auth';
 
 import DrawerNavigator from './DrawerNavigator';
@@ -10,8 +14,12 @@ import LoginScreen from '../screens/LoginScreen';
 import appColors from '../styles/appColors';
 import { RootStackNavigatorType } from '../types/navigationTypes';
 import { getUser } from '../firebase/userCollection';
+import NotificationController from '../notification/NotificationController';
 
 const Stack = createNativeStackNavigator<RootStackNavigatorType>();
+
+export const navigationRef =
+  createRef<NavigationContainerRef<RootStackNavigatorType>>();
 
 const NavigationTheme = {
   ...DefaultTheme,
@@ -43,17 +51,19 @@ const RootNavigator = () => {
   if (initializing) return null;
 
   return (
-    <NavigationContainer theme={NavigationTheme}>
-      <Stack.Navigator
-        initialRouteName={initialRouteName}
-        screenOptions={{
-          headerShown: false,
-        }}
-      >
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Drawer" component={DrawerNavigator} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <NotificationController>
+      <NavigationContainer theme={NavigationTheme} ref={navigationRef}>
+        <Stack.Navigator
+          initialRouteName={initialRouteName}
+          screenOptions={{
+            headerShown: false,
+          }}
+        >
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Drawer" component={DrawerNavigator} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </NotificationController>
   );
 };
 

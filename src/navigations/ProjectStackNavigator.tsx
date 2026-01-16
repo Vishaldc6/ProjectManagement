@@ -16,10 +16,34 @@ const ProjectStackNavigator = () => {
         headerShown: false,
       }}
     >
-      <Stack.Screen name="Project" component={ProjectScreen} />
-      <Stack.Screen name="ProjectDetail" component={ProjectDetailScreen} />
-      <Stack.Screen name="ProjectForm" component={ProjectFormScreen} />
-      <Stack.Screen name="TaskForm" component={TaskFormScreen} />
+      <Stack.Screen
+        name="Project"
+        component={ProjectScreen}
+        options={{
+          title: 'Project',
+        }}
+      />
+      <Stack.Screen
+        name="ProjectDetail"
+        component={ProjectDetailScreen}
+        options={{
+          title: 'Project',
+        }}
+      />
+      <Stack.Screen
+        name="ProjectForm"
+        component={ProjectFormScreen}
+        options={{
+          title: 'Project',
+        }}
+      />
+      <Stack.Screen
+        name="TaskForm"
+        component={TaskFormScreen}
+        options={{
+          title: 'Project',
+        }}
+      />
     </Stack.Navigator>
   );
 };

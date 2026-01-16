@@ -11,11 +11,16 @@ import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
 } from 'react-native-responsive-screen';
-import { onSnapshot, orderBy, query } from '@react-native-firebase/firestore';
+import {
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
 
 import { useAppNavigation } from '../hooks/useAppNavigation';
-import { projectRef } from '../firebase/projectCollection';
-import { ProjectType } from '../types/appTypes';
+import { membersProjectsRef, projectRef } from '../firebase/projectCollection';
+import { MemberProjectType, ProjectType } from '../types/appTypes';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import {
@@ -25,26 +30,97 @@ import {
   BaseLoader,
 } from '../components';
 import { PROJECT_STATUS_LIST } from '../constants';
-import { toCapitalize } from '../utils/helperFunctions';
+import { sendNotification, toCapitalize } from '../utils/helperFunctions';
+import { useAppSelector } from '../hooks/reduxHooks';
 
 const ProjectScreen = () => {
+  const { user } = useAppSelector(state => state.AuthReducer);
   const navigation = useAppNavigation('Project');
 
+  const IS_ADMIN = user?.role === 'Admin';
   const [isLoading, setIsLoading] = useState(true);
+  // admin
   const [projectList, setProjectList] = useState<ProjectType[]>([]);
+  // member
+  const [memberProjectList, setMemberProjectList] = useState<
+    MemberProjectType[]
+  >([]);
+
   const [isModalVisiable, setIsModalVisiable] = useState(false);
   const [searchText, setSearchText] = useState<string>('');
   const [selectedFilter, setSelectedFilter] = useState<string>('ALL');
-  const [filterProjectList, setFilterProjectList] =
-    useState<ProjectType[]>(projectList);
+  const [filterProjectList, setFilterProjectList] = useState<
+    ProjectType[] | MemberProjectType[]
+  >();
+
+  // ------fetch project ids from member_project then fetch project details from it---
+  // useEffect(() => {
+  //   let unsubscribe: Unsubscribe;
+  //   let q = query(projectRef, orderBy('created_at', 'desc'));
+
+  //   getAccosiatedProjects().then(ids => {
+  //     if (ids?.length) {
+  //       q = query(
+  //         projectRef,
+  //         orderBy('created_at', 'desc'),
+  //         where('id', 'in', ids),
+  //       );
+  //     }
+
+  //     unsubscribe = onSnapshot(q, querySnapshot => {
+  //       const projects: ProjectType[] = [];
+  //       querySnapshot.forEach((doc: any) => projects.push(doc.data()));
+  //       setProjectList(projects);
+  //       setFilterProjectList(projects);
+  //       setIsLoading(false);
+  //     });
+  //   });
+
+  //   return () => {
+  //     unsubscribe();
+  //   };
+  // }, []);
+
+  // // fetch project ids in which current user associated
+  // const getAccosiatedProjects = async () => {
+  //   if (!IS_ADMIN) {
+  //     const member_q = query(
+  //       membersProjectsRef,
+  //       where('member_id', '==', user?.id),
+  //     );
+  //     const ids: string[] = [];
+  //     const snapshots = await getDocs(member_q);
+  //     snapshots.forEach((doc: any) => ids.push(doc.data().project_id));
+  //     return ids;
+  //   }
+  // };
 
   useEffect(() => {
-    const q = query(projectRef, orderBy('created_at', 'desc'));
+    let q;
+    if (IS_ADMIN) {
+      q = query(projectRef, orderBy('updated_at', 'desc'));
+    } else {
+      q = query(
+        membersProjectsRef,
+        where('member_id', '==', user?.id),
+        orderBy('updated_at', 'desc'),
+      );
+    }
+
     const unsubscribe = onSnapshot(q, querySnapshot => {
       const projects: ProjectType[] = [];
-      querySnapshot.forEach((doc: any) => projects.push(doc.data()));
-      setProjectList(projects);
-      setFilterProjectList(projects);
+      const memberProjects: MemberProjectType[] = [];
+      querySnapshot &&
+        querySnapshot.forEach((doc: any) => {
+          IS_ADMIN
+            ? projects.push(doc.data())
+            : memberProjects.push(doc.data());
+        });
+
+      IS_ADMIN
+        ? setProjectList(projects)
+        : setMemberProjectList(memberProjects);
+      setFilterProjectList(IS_ADMIN ? projects : memberProjects);
       setIsLoading(false);
     });
 
@@ -54,20 +130,35 @@ const ProjectScreen = () => {
   }, []);
 
   useEffect(() => {
-    let list = projectList;
-    if (searchText) {
-      list = list.filter(
-        proj =>
-          proj.title.toLowerCase().startsWith(searchText.toLowerCase()) ||
-          proj.client_name.toLowerCase().startsWith(searchText.toLowerCase()),
-      );
+    if (IS_ADMIN) {
+      let list = projectList;
+      if (searchText) {
+        list = list.filter(
+          proj =>
+            proj.title.toLowerCase().startsWith(searchText.toLowerCase()) ||
+            proj.client_name.toLowerCase().startsWith(searchText.toLowerCase()),
+        );
+      }
+      if (selectedFilter !== 'ALL') {
+        list = list.filter(
+          proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
+        );
+      }
+      setFilterProjectList(list);
+    } else {
+      let list = memberProjectList;
+      if (searchText) {
+        list = list.filter(proj =>
+          proj.project_title.toLowerCase().startsWith(searchText.toLowerCase()),
+        );
+      }
+      if (selectedFilter !== 'ALL') {
+        list = list.filter(
+          proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
+        );
+      }
+      setFilterProjectList(list);
     }
-    if (selectedFilter !== 'ALL') {
-      list = list.filter(
-        proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
-      );
-    }
-    setFilterProjectList(list);
   }, [searchText, selectedFilter]);
 
   const renderProject = ({ item }: { item: ProjectType }) => {
@@ -81,12 +172,71 @@ const ProjectScreen = () => {
           })
         }
       >
-        <View style={styles.projectImg}>{/* folder icon */}</View>
-        <View style={styles.projectDetail}>
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.client}>{item.client_name}</Text>
+        <View style={styles.projectImg}>
+          <BaseIcon name="FolderOpen" color={appColors.PRIMARY} />
         </View>
-        {/* arrow */}
+        <View style={styles.projectDetail}>
+          <Text style={styles.title} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.client} numberOfLines={1}>
+            {item.client_name}
+          </Text>
+        </View>
+        <BaseIcon name="ChevronRight" color={appColors.BORDER} />
+      </TouchableOpacity>
+    );
+  };
+
+  const renderMemberProject = ({ item }: { item: MemberProjectType }) => {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        style={styles.memberProjectCard}
+        onPress={() =>
+          navigation.navigate('ProjectDetail', {
+            id: item.project_id,
+          })
+        }
+      >
+        <View style={styles.memberProjectSubCard}>
+          <View style={styles.memberProjectInfo}>
+            <Text style={styles.title} numberOfLines={1}>
+              {item.project_title}
+            </Text>
+            <View style={styles.clientInfoContainer}>
+              <BaseIcon
+                name="Building"
+                color={appColors.SECONDARY_TEXT}
+                size={appFonts.FONT_18}
+              />
+              <Text style={styles.client} numberOfLines={1}>
+                {item?.client_name}
+              </Text>
+            </View>
+          </View>
+
+          <BaseIcon name="ChevronRight" color={appColors.BORDER} />
+        </View>
+        <View
+          style={[
+            styles.statusCard,
+            item?.status === 'ACTIVE'
+              ? styles.activeStatusCard
+              : item?.status === 'COMPLETED' && styles.completedStatusCard,
+          ]}
+        >
+          <Text
+            style={[
+              styles.projectStatus,
+              item?.status === 'ACTIVE'
+                ? styles.activeStatus
+                : item?.status === 'COMPLETED' && styles.completedStatus,
+            ]}
+          >
+            {toCapitalize(item?.status)}
+          </Text>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -94,9 +244,11 @@ const ProjectScreen = () => {
   const ListEmptyComponent = () => (
     <View style={styles.emptyContainer}>
       <Text>
-        {filterProjectList.length === 0 && searchText
-          ? 'Search project or client not found'
-          : 'Project not found!'}
+        {filterProjectList?.length === 0 && searchText
+          ? IS_ADMIN
+            ? 'Searched project or client not found'
+            : 'Searched project not found'
+          : 'Projects not found!'}
       </Text>
     </View>
   );
@@ -112,9 +264,12 @@ const ProjectScreen = () => {
         <BaseInput
           value={searchText}
           onChangeText={text => setSearchText(text)}
-          placeholder="Search Project name or client name"
+          placeholder={
+            IS_ADMIN
+              ? 'Search Project name or client name'
+              : 'Search Project name'
+          }
           containerStyle={{ flex: 1 }}
-          style={{ backgroundColor: appColors.SECONDARY_INPUT_BACKGROUND }}
         />
         <TouchableOpacity
           activeOpacity={0.8}
@@ -128,14 +283,16 @@ const ProjectScreen = () => {
       <FlatList
         contentContainerStyle={styles.listContainer}
         data={filterProjectList}
-        renderItem={renderProject}
+        renderItem={IS_ADMIN ? renderProject : renderMemberProject}
         ListEmptyComponent={ListEmptyComponent}
       />
 
-      <BaseFloatingButton
-        name="Plus"
-        onPress={() => navigation.navigate('ProjectForm')}
-      />
+      {IS_ADMIN && (
+        <BaseFloatingButton
+          name="Plus"
+          onPress={() => navigation.navigate('ProjectForm')}
+        />
+      )}
 
       <Modal
         animationType="slide"
@@ -184,13 +341,12 @@ export default ProjectScreen;
 const styles = StyleSheet.create({
   container: { flex: 1 },
   searchHeader: {
-    backgroundColor: appColors.SECONDARY_BACKGROUND,
     flexDirection: 'row',
     gap: wp(3),
     alignItems: 'center',
     paddingHorizontal: wp(3),
-    paddingVertical: hp(1),
-    elevation: 5,
+    paddingBottom: hp(1),
+    paddingTop: hp(2),
   },
   filterIconContainer: {
     backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
@@ -213,20 +369,71 @@ const styles = StyleSheet.create({
     gap: wp(3),
     marginBottom: hp(0.8),
   },
+  memberProjectCard: {
+    backgroundColor: appColors.SECONDARY_BACKGROUND,
+    borderColor: appColors.BORDER,
+    borderWidth: 1,
+    marginHorizontal: wp(3),
+    borderRadius: wp(2),
+    padding: wp(3),
+    gap: wp(3),
+    marginBottom: hp(0.8),
+  },
+  memberProjectSubCard: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  memberProjectInfo: {
+    flex: 1,
+    gap: hp(0.5),
+  },
   projectDetail: {
+    flex: 1,
     gap: hp(0.5),
   },
   projectImg: {
-    backgroundColor: appColors.PRIMARY,
+    backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
     width: wp(15),
     height: wp(15),
     borderRadius: wp(15),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: appFonts.FONT_12,
     fontWeight: '500',
   },
-  client: {},
+  clientInfoContainer: {
+    flexDirection: 'row',
+    gap: wp(1),
+  },
+  client: {
+    fontSize: appFonts.FONT_12,
+    color: appColors.SECONDARY_TEXT,
+  },
+  statusCard: {
+    alignSelf: 'flex-start',
+    padding: wp(1),
+    paddingHorizontal: wp(3),
+    borderRadius: wp(10),
+    backgroundColor: appColors.PROJECT_IN_ACTIVE_BG,
+  },
+  activeStatusCard: {
+    backgroundColor: appColors.PROJECT_ACTIVE_BG,
+  },
+  completedStatusCard: {
+    backgroundColor: appColors.PROJECT_COMPLETED_BG,
+  },
+  projectStatus: {
+    fontWeight: 'bold',
+    color: appColors.PROJECT_IN_ACTIVE,
+  },
+  activeStatus: {
+    color: appColors.PROJECT_ACTIVE,
+  },
+  completedStatus: {
+    color: appColors.PROJECT_COMPLETED,
+  },
   emptyContainer: {
     height: hp(75),
     justifyContent: 'center',

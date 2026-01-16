@@ -1,6 +1,7 @@
 import { RFValue } from 'react-native-responsive-fontsize';
 
 export default {
+  FONT_10: RFValue(10),
   FONT_12: RFValue(12),
   FONT_14: RFValue(14),
   FONT_16: RFValue(16),
