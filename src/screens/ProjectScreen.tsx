@@ -19,8 +19,8 @@ import {
 } from '@react-native-firebase/firestore';
 
 import { useAppNavigation } from '../hooks/useAppNavigation';
-import { membersProjectsRef, projectRef } from '../firebase/projectCollection';
-import { MemberProjectType, ProjectType } from '../types/appTypes';
+import { projectRef } from '../firebase/projectCollection';
+import { ProjectType } from '../types/appTypes';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import {
@@ -30,7 +30,7 @@ import {
   BaseLoader,
 } from '../components';
 import { PROJECT_STATUS_LIST } from '../constants';
-import { sendNotification, toCapitalize } from '../utils/helperFunctions';
+import { toCapitalize } from '../utils/helperFunctions';
 import { useAppSelector } from '../hooks/reduxHooks';
 
 const ProjectScreen = () => {
@@ -39,61 +39,11 @@ const ProjectScreen = () => {
 
   const IS_ADMIN = user?.role === 'Admin';
   const [isLoading, setIsLoading] = useState(true);
-  // admin
   const [projectList, setProjectList] = useState<ProjectType[]>([]);
-  // member
-  const [memberProjectList, setMemberProjectList] = useState<
-    MemberProjectType[]
-  >([]);
-
   const [isModalVisiable, setIsModalVisiable] = useState(false);
   const [searchText, setSearchText] = useState<string>('');
   const [selectedFilter, setSelectedFilter] = useState<string>('ALL');
-  const [filterProjectList, setFilterProjectList] = useState<
-    ProjectType[] | MemberProjectType[]
-  >();
-
-  // ------fetch project ids from member_project then fetch project details from it---
-  // useEffect(() => {
-  //   let unsubscribe: Unsubscribe;
-  //   let q = query(projectRef, orderBy('created_at', 'desc'));
-
-  //   getAccosiatedProjects().then(ids => {
-  //     if (ids?.length) {
-  //       q = query(
-  //         projectRef,
-  //         orderBy('created_at', 'desc'),
-  //         where('id', 'in', ids),
-  //       );
-  //     }
-
-  //     unsubscribe = onSnapshot(q, querySnapshot => {
-  //       const projects: ProjectType[] = [];
-  //       querySnapshot.forEach((doc: any) => projects.push(doc.data()));
-  //       setProjectList(projects);
-  //       setFilterProjectList(projects);
-  //       setIsLoading(false);
-  //     });
-  //   });
-
-  //   return () => {
-  //     unsubscribe();
-  //   };
-  // }, []);
-
-  // // fetch project ids in which current user associated
-  // const getAccosiatedProjects = async () => {
-  //   if (!IS_ADMIN) {
-  //     const member_q = query(
-  //       membersProjectsRef,
-  //       where('member_id', '==', user?.id),
-  //     );
-  //     const ids: string[] = [];
-  //     const snapshots = await getDocs(member_q);
-  //     snapshots.forEach((doc: any) => ids.push(doc.data().project_id));
-  //     return ids;
-  //   }
-  // };
+  const [filterProjectList, setFilterProjectList] = useState<ProjectType[]>();
 
   useEffect(() => {
     let q;
@@ -101,26 +51,18 @@ const ProjectScreen = () => {
       q = query(projectRef, orderBy('updated_at', 'desc'));
     } else {
       q = query(
-        membersProjectsRef,
-        where('member_id', '==', user?.id),
+        projectRef,
+        where('member_list', 'array-contains', user?.id),
         orderBy('updated_at', 'desc'),
       );
     }
 
     const unsubscribe = onSnapshot(q, querySnapshot => {
       const projects: ProjectType[] = [];
-      const memberProjects: MemberProjectType[] = [];
       querySnapshot &&
-        querySnapshot.forEach((doc: any) => {
-          IS_ADMIN
-            ? projects.push(doc.data())
-            : memberProjects.push(doc.data());
-        });
-
-      IS_ADMIN
-        ? setProjectList(projects)
-        : setMemberProjectList(memberProjects);
-      setFilterProjectList(IS_ADMIN ? projects : memberProjects);
+        querySnapshot.forEach((doc: any) => projects.push(doc.data()));
+      setProjectList(projects);
+      setFilterProjectList(projects);
       setIsLoading(false);
     });
 
@@ -130,35 +72,24 @@ const ProjectScreen = () => {
   }, []);
 
   useEffect(() => {
-    if (IS_ADMIN) {
-      let list = projectList;
-      if (searchText) {
-        list = list.filter(
-          proj =>
-            proj.title.toLowerCase().startsWith(searchText.toLowerCase()) ||
-            proj.client_name.toLowerCase().startsWith(searchText.toLowerCase()),
-        );
-      }
-      if (selectedFilter !== 'ALL') {
-        list = list.filter(
-          proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
-        );
-      }
-      setFilterProjectList(list);
-    } else {
-      let list = memberProjectList;
-      if (searchText) {
-        list = list.filter(proj =>
-          proj.project_title.toLowerCase().startsWith(searchText.toLowerCase()),
-        );
-      }
-      if (selectedFilter !== 'ALL') {
-        list = list.filter(
-          proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
-        );
-      }
-      setFilterProjectList(list);
+    let list = projectList;
+    if (searchText) {
+      list = list.filter(
+        proj =>
+          proj.title.toLowerCase().startsWith(searchText.toLowerCase()) ||
+          (IS_ADMIN
+            ? proj.client_name
+                .toLowerCase()
+                .startsWith(searchText.toLowerCase())
+            : false),
+      );
     }
+    if (selectedFilter !== 'ALL') {
+      list = list.filter(
+        proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
+      );
+    }
+    setFilterProjectList(list);
   }, [searchText, selectedFilter]);
 
   const renderProject = ({ item }: { item: ProjectType }) => {
@@ -188,21 +119,21 @@ const ProjectScreen = () => {
     );
   };
 
-  const renderMemberProject = ({ item }: { item: MemberProjectType }) => {
+  const renderMemberProject = ({ item }: { item: ProjectType }) => {
     return (
       <TouchableOpacity
         activeOpacity={0.8}
         style={styles.memberProjectCard}
         onPress={() =>
           navigation.navigate('ProjectDetail', {
-            id: item.project_id,
+            id: item.id,
           })
         }
       >
         <View style={styles.memberProjectSubCard}>
           <View style={styles.memberProjectInfo}>
             <Text style={styles.title} numberOfLines={1}>
-              {item.project_title}
+              {item.title}
             </Text>
             <View style={styles.clientInfoContainer}>
               <BaseIcon

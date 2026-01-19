@@ -21,7 +21,7 @@ import {
   CommentType,
   MemberType,
   ProjectType,
-  TaskStatusType,
+  TaskStatusEnum,
   TaskType,
   UserType,
 } from '../../types/appTypes';
@@ -46,7 +46,9 @@ const TaskFormScreen = () => {
   const isUpdateMode = !!params?.task;
   const IS_ADMIN = user?.role == 'Admin';
 
-  const [currentStatus, setCurrentStatus] = useState<TaskStatusType>('TO DO');
+  const [currentStatus, setCurrentStatus] = useState<TaskStatusEnum>(
+    TaskStatusEnum.TO_DO,
+  );
   const [memberList, setMemberList] = useState<MemberType[]>([]);
   const [project, setProject] = useState<Partial<ProjectType>>();
   const [isLoading, setIsLoading] = useState(false);
@@ -105,15 +107,11 @@ const TaskFormScreen = () => {
   });
 
   useEffect(() => {
-    if (IS_ADMIN) {
+    if (IS_ADMIN && params?.projectId) {
       setIsLoading(true);
-      if (params?.project) {
-        setProject(params?.project);
-      } else {
-        fetchSingleProject(params?.projectId ?? '').then(proj =>
-          setProject(proj),
-        );
-      }
+      fetchSingleProject(params?.projectId ?? '').then(proj =>
+        setProject(proj),
+      );
     }
 
     if (params.task) {
@@ -340,9 +338,9 @@ const TaskFormScreen = () => {
             {TASK_STATUS_LIST.map(status => {
               const isSelected = status === currentStatus;
               const iconColor =
-                status === 'DONE'
+                status === TaskStatusEnum.DONE
                   ? appColors.TASK_DONE
-                  : status === 'TO DO'
+                  : status === TaskStatusEnum.TO_DO
                   ? appColors.TASK_TODO
                   : appColors.TASK_IN_PROGRESS;
               return (
@@ -354,9 +352,7 @@ const TaskFormScreen = () => {
                       backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
                     },
                   ]}
-                  onPress={() => {
-                    setCurrentStatus(status as TaskStatusType);
-                  }}
+                  onPress={() => setCurrentStatus(status)}
                 >
                   <BaseIcon
                     name="CircleDot"

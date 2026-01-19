@@ -41,7 +41,7 @@ export type TaskType = {
   assigned_member: string;
   project_id: string;
   project_title: string;
-  task_status: TaskStatusType;
+  task_status: TaskStatusEnum;
   // comments: CommentType[];
   created_by?: string;
   file_url?: string[];
@@ -58,7 +58,11 @@ export type CommentType = {
   file_url?: string[];
 };
 
-export type TaskStatusType = 'TO DO' | 'IN-PROGRESS' | 'DONE';
+export enum TaskStatusEnum {
+  TO_DO = 'TO DO',
+  IN_PROGRESS = 'IN-PROGRESS',
+  DONE = 'DONE',
+}
 
 export type MemberType = {} & UserType;
 

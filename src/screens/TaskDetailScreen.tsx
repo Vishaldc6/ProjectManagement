@@ -12,7 +12,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
-  widthPercentageToDP,
 } from 'react-native-responsive-screen';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -30,7 +29,7 @@ import {
   getTask,
   tasksCommentsRef,
 } from '../firebase/taskCollection';
-import { CommentType, TaskType } from '../types/appTypes';
+import { CommentType, TaskStatusEnum, TaskType } from '../types/appTypes';
 import appColors from '../styles/appColors';
 import {
   BaseButton,
@@ -98,19 +97,15 @@ const TaskDetailScreen = () => {
     };
   }, []);
 
-  const taskIconTextColor =
-    task?.task_status === 'DONE'
-      ? appColors.TASK_DONE
-      : task?.task_status === 'IN-PROGRESS'
-      ? appColors.TASK_IN_PROGRESS
-      : appColors.TASK_TODO;
-
-  const statusBgColor =
-    task?.task_status === 'DONE'
-      ? appColors.TASK_DONE_BG
-      : task?.task_status === 'IN-PROGRESS'
-      ? appColors.TASK_IN_PROGRESS_BG
-      : appColors.TASK_TODO_BG;
+  const taskColor =
+    task?.task_status === TaskStatusEnum.DONE
+      ? { iconText: appColors.TASK_DONE, background: appColors.TASK_DONE_BG }
+      : task?.task_status === TaskStatusEnum.IN_PROGRESS
+      ? {
+          iconText: appColors.TASK_IN_PROGRESS,
+          background: appColors.TASK_IN_PROGRESS_BG,
+        }
+      : { iconText: appColors.TASK_TODO, background: appColors.TASK_TODO_BG };
 
   const handleAddComment = async () => {
     setIsAddCmtLoading(true);
@@ -161,25 +156,25 @@ const TaskDetailScreen = () => {
             <Text
               style={[
                 styles.taskStatus,
-                { color: taskIconTextColor, backgroundColor: statusBgColor },
+                {
+                  color: taskColor.iconText,
+                  backgroundColor: taskColor.background,
+                },
               ]}
             >
               {task?.task_status && toCapitalize(task?.task_status)}
             </Text>
-            {!IS_ADMIN && (
-              <Text
-                style={styles.linkText}
-                onPress={() => {
-                  navigation.navigate('TaskForm', {
-                    task: task,
-                    projectId: task?.project_id,
-                  });
-                }}
-              >
-                {'Update Status'}
-                {/* {IS_ADMIN ? 'Edit' : 'Update Status'} */}
-              </Text>
-            )}
+            <Text
+              style={styles.linkText}
+              onPress={() => {
+                navigation.navigate('TaskForm', {
+                  task: task,
+                  projectId: task?.project_id,
+                });
+              }}
+            >
+              {IS_ADMIN ? 'Edit' : 'Update Status'}
+            </Text>
           </View>
           <Text style={styles.taskTitle}>{task?.title}</Text>
           <View style={styles.projectRow}>
@@ -195,8 +190,8 @@ const TaskDetailScreen = () => {
                 <Image
                   source={{
                     uri: task?.file_url[0],
-                    width: widthPercentageToDP(20),
-                    height: widthPercentageToDP(20),
+                    width: wp(20),
+                    height: wp(20),
                   }}
                 />
               </Pressable>
@@ -243,8 +238,8 @@ const TaskDetailScreen = () => {
                     <Image
                       source={{
                         uri: comment.file_url[0],
-                        width: widthPercentageToDP(20),
-                        height: widthPercentageToDP(20),
+                        width: wp(20),
+                        height: wp(20),
                       }}
                     />
                   </Pressable>
