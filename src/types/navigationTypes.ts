@@ -2,7 +2,7 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 import { ProjectType, TaskType } from './appTypes';
 
 export type RootStackNavigatorType = {
-  Login: undefined;
+  Login: { forSignUp?: boolean };
   Drawer: NavigatorScreenParams<DrawerNavigatorType>;
 };
 
@@ -10,6 +10,7 @@ export type DrawerNavigatorType = {
   ProjectStack: NavigatorScreenParams<ProjectStackNavigatorType>;
   TaskStack: NavigatorScreenParams<TaskStackNavigatorType>;
   Member: undefined;
+  Profile: undefined;
 };
 
 export type ProjectStackNavigatorType = {

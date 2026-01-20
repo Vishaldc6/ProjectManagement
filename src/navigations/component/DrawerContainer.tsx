@@ -6,13 +6,14 @@ import {
   DrawerItem,
   DrawerItemList,
 } from '@react-navigation/drawer';
-import { getAuth, signOut } from '@react-native-firebase/auth';
+import { signOut } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 import { USER_LOGOUT } from '../../redux/store';
 import { useAppDispatch } from '../../hooks/reduxHooks';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import appColors from '../../styles/appColors';
+import { authApp } from '../../firebase';
 
 const DrawerContainer = (props: DrawerContentComponentProps) => {
   const dispatch = useAppDispatch();
@@ -31,7 +32,7 @@ const DrawerContainer = (props: DrawerContentComponentProps) => {
   };
 
   const handleSignOut = async () => {
-    signOut(getAuth());
+    signOut(authApp);
     await GoogleSignin.signOut();
     dispatch({ type: USER_LOGOUT });
     navigation.reset({

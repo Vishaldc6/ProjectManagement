@@ -6,12 +6,13 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import appColors from '../styles/appColors';
 import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
+import BaseIcon from './BaseIcon';
 
 interface BaseInputPropsType {
   title?: string;
@@ -21,6 +22,8 @@ interface BaseInputPropsType {
 }
 
 const BaseInput = (props: BaseInputPropsType & TextInputProps) => {
+  const [securePassword, setSecurePassword] = useState(props.secureTextEntry);
+
   return (
     <View style={[styles.baseContainer, props.containerStyle]}>
       {props.title && (
@@ -29,11 +32,21 @@ const BaseInput = (props: BaseInputPropsType & TextInputProps) => {
           {props.required && <Text style={styles.requireText}>*</Text>}
         </Text>
       )}
-      <TextInput
-        placeholderTextColor={appColors.SECONDARY_TEXT}
-        {...props}
-        style={[styles.input, props.style]}
-      />
+      <View style={styles.inputContainer}>
+        <TextInput
+          placeholderTextColor={appColors.SECONDARY_TEXT}
+          {...props}
+          style={[styles.input, props.style]}
+          secureTextEntry={securePassword}
+        />
+        {props.secureTextEntry && (
+          <BaseIcon
+            name={securePassword ? 'EyeOff' : 'Eye'}
+            color={appColors.BORDER}
+            onPress={() => setSecurePassword(!securePassword)}
+          />
+        )}
+      </View>
       {props.errorMessage && (
         <Text style={styles.errorMessage}>{props.errorMessage}</Text>
       )}
@@ -49,11 +62,21 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: hp(0.5),
   },
-  input: {
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: appColors.INPUT_BACKGROUND,
     borderColor: appColors.BORDER,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: wp(2),
+    paddingHorizontal: wp(2),
+  },
+  input: {
+    flex: 1,
+    // backgroundColor: appColors.INPUT_BACKGROUND,
+    // borderColor: appColors.BORDER,
+    // borderWidth: StyleSheet.hairlineWidth,
+    // borderRadius: wp(2),
   },
   requireText: {
     color: appColors.ERROR_TEXT,

@@ -37,7 +37,10 @@ const MemberListScreen = () => {
       });
       setMemberList(_memberList);
       setFilterMemberList(_memberList);
-      setRoleList(['All', ...new Set(_memberList.map(({ role }) => role))]);
+      setRoleList([
+        'All',
+        ...new Set(_memberList.map(({ role }) => role ?? '')),
+      ]);
       setIsLoading(false);
     });
 
@@ -51,7 +54,7 @@ const MemberListScreen = () => {
       selectedRole === 'All'
         ? memberList
         : memberList.filter(
-            ({ role }) => role.toLowerCase() === selectedRole.toLowerCase(),
+            ({ role }) => role?.toLowerCase() === selectedRole.toLowerCase(),
           ),
     );
   }, [selectedRole]);

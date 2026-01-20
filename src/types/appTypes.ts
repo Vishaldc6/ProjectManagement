@@ -4,21 +4,23 @@ export interface UserType {
   id: string;
   name: string;
   email: string;
-  role: RolesType;
+  role?: RolesType;
   created_at?: Timestamp;
   updated_at?: Timestamp;
   fcm_token?: string[];
   // later add more
 }
 
-export type RolesType =
-  | 'Admin'
-  | 'Developer'
-  | 'UI/UX'
-  | 'Web Developer'
-  | 'Mobile Developer'
-  | 'QA'
-  | 'Project Manager';
+export enum RolesType {
+  Admin = 'Admin',
+  Member = 'Member',
+  Developer = 'Developer',
+  UI_UX = 'UI/UX',
+  Web_Developer = 'Web Developer',
+  Mobile_Developer = 'Mobile Developer',
+  QA = 'QA',
+  Project_Manager = 'Project Manager',
+}
 
 export type ProjectType = {
   client_name: string;

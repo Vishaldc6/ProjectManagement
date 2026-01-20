@@ -15,7 +15,7 @@ import { taskRef } from '../firebase/taskCollection';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import { useAppNavigation } from '../hooks/useAppNavigation';
-import { ProjectType, TaskType } from '../types/appTypes';
+import { ProjectType, RolesType, TaskType } from '../types/appTypes';
 import { fetchSingleProject } from '../firebase/projectCollection';
 import { BaseIcon, BaseLoader } from '../components';
 import { useAppSelector } from '../hooks/reduxHooks';
@@ -24,7 +24,7 @@ import { useAppRoutes } from '../hooks/useAppRoute';
 
 const ProjectDetailScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
-  const IS_ADMIN = user?.role === 'Admin';
+  const IS_ADMIN = user?.role === RolesType.Admin;
 
   const { params } = useAppRoutes<'ProjectDetail'>();
   const navigation = useAppNavigation('ProjectDetail');
