@@ -1,10 +1,19 @@
-import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
 } from 'react-native-responsive-screen';
 import {
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -15,23 +24,41 @@ import { taskRef } from '../firebase/taskCollection';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import { useAppNavigation } from '../hooks/useAppNavigation';
-import { ProjectType, RolesType, TaskType } from '../types/appTypes';
-import { fetchSingleProject } from '../firebase/projectCollection';
-import { BaseIcon, BaseLoader } from '../components';
+import {
+  ProjectStatusType,
+  ProjectType,
+  RolesType,
+  TaskType,
+  UserType,
+} from '../types/appTypes';
+import {
+  fetchProjectMembers,
+  fetchSingleProject,
+  updateProject,
+} from '../firebase/projectCollection';
+import { BaseIcon, BaseLoader, BaseModal } from '../components';
 import { useAppSelector } from '../hooks/reduxHooks';
 import { timestampToDate, toCapitalize } from '../utils/helperFunctions';
 import { useAppRoutes } from '../hooks/useAppRoute';
 
 const ProjectDetailScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
-  const IS_ADMIN = user?.role === RolesType.Admin;
 
   const { params } = useAppRoutes<'ProjectDetail'>();
   const navigation = useAppNavigation('ProjectDetail');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isMemberListLoading, setIsMemberListLoading] = useState(true);
   const [taskList, setTaskList] = useState<TaskType[]>([]);
   const [project, setProject] = useState<ProjectType | undefined>();
+  const [memberListModal, setMemberListModal] = useState(false);
+  const [memberList, setMemberList] = useState<UserType[]>([]);
+
+  const IS_ADMIN = user?.role === RolesType.Admin;
+  const IS_PM = useMemo(
+    () => project?.project_manager?.includes(user?.id ?? ''),
+    [project],
+  );
 
   useEffect(() => {
     if (params?.id) {
@@ -39,23 +66,30 @@ const ProjectDetailScreen = () => {
       fetchSingleProject(params?.id).then(res => {
         setProject(res);
         setIsLoading(false);
+        fetchProjectMembers(res).then(members => {
+          setIsMemberListLoading(false);
+          setMemberList(members);
+        });
       });
     }
   }, []);
 
   useEffect(() => {
-    let q = query(
-      taskRef,
-      where('project_id', '==', params?.id),
-      orderBy('updated_at', 'desc'),
-    );
-
-    if (!IS_ADMIN) {
+    let q;
+    if (IS_ADMIN || IS_PM) {
+      q = query(
+        taskRef,
+        where('project_id', '==', params?.id),
+        orderBy('updated_at', 'desc'),
+        limit(4),
+      );
+    } else {
       q = query(
         taskRef,
         where('assigned_to', '==', user?.id),
         where('project_id', '==', params?.id),
         orderBy('updated_at', 'desc'),
+        limit(4),
       );
     }
 
@@ -70,9 +104,69 @@ const ProjectDetailScreen = () => {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [IS_PM]);
+
+  enum OperationTypes {
+    ARCHIVE = 'ARCHIVE',
+    RESTORE = 'RESTORE',
+    DELETE = 'DELETE',
+  }
+  const handleConfirm = (type: OperationTypes) => {
+    const title =
+      type === OperationTypes.ARCHIVE
+        ? 'Project Archive'
+        : type === OperationTypes.RESTORE
+        ? 'Project Restore'
+        : 'Project Delete';
+    const msg =
+      type === OperationTypes.ARCHIVE
+        ? 'Are you sure to archive this project?'
+        : type === OperationTypes.RESTORE
+        ? 'Are you sure to restore this project?'
+        : 'Are you sure to delete this project?';
+    Alert.alert(title, msg, [
+      {
+        text: 'No',
+      },
+      {
+        text: 'Yes',
+        onPress: () => handleOperation(type),
+      },
+    ]);
+  };
+
+  const handleOperation = (operation: OperationTypes) => {
+    setIsLoading(true);
+    const data: Partial<TaskType> =
+      operation === OperationTypes.DELETE
+        ? { is_deleted: true }
+        : { is_archived: operation === OperationTypes.ARCHIVE ? true : false };
+    updateProject(project?.id ?? '', data).then(() => {
+      setIsLoading(false);
+      navigation.goBack();
+    });
+  };
 
   const renderItem = ({ item: task }: { item: TaskType }) => {
+    const taskStyle =
+      task.task_status === 'DONE'
+        ? {
+            icon: 'CircleCheck',
+            bg: appColors.TASK_DONE_BG,
+            iconColor: appColors.TASK_DONE,
+          }
+        : task.task_status === 'IN-PROGRESS'
+        ? {
+            icon: 'CircleDot',
+            bg: appColors.TASK_IN_PROGRESS_BG,
+            iconColor: appColors.TASK_IN_PROGRESS,
+          }
+        : {
+            icon: 'Circle',
+            bg: appColors.TASK_TODO_BG,
+            iconColor: appColors.TASK_TODO,
+          };
+
     const taskIcon =
       task.task_status === 'DONE'
         ? 'CircleCheck'
@@ -80,30 +174,16 @@ const ProjectDetailScreen = () => {
         ? 'CircleDot'
         : 'Circle';
 
-    const taskIconTextColor =
-      task.task_status === 'DONE'
-        ? appColors.TASK_DONE
-        : task.task_status === 'IN-PROGRESS'
-        ? appColors.TASK_IN_PROGRESS
-        : appColors.TASK_TODO;
-
-    const statusBgColor =
-      task.task_status === 'DONE'
-        ? appColors.TASK_DONE_BG
-        : task.task_status === 'IN-PROGRESS'
-        ? appColors.TASK_IN_PROGRESS_BG
-        : appColors.TASK_TODO_BG;
-
     return (
       <View style={styles.taskCard}>
-        <BaseIcon name={taskIcon} color={taskIconTextColor} />
+        <BaseIcon name={taskIcon} color={taskStyle.iconColor} />
         <View style={styles.taskInfo}>
           <Text style={styles.taskTitle} numberOfLines={1}>
-            {task.title}
+            {toCapitalize(task.title)}
           </Text>
-          {IS_ADMIN && (
+          {(IS_ADMIN || IS_PM) && (
             <Text style={styles.taskMember} numberOfLines={1}>
-              {task.assigned_member}
+              {toCapitalize(task.assigned_member)}
             </Text>
           )}
           <Text style={styles.taskAssignAt} numberOfLines={2}>
@@ -114,7 +194,10 @@ const ProjectDetailScreen = () => {
         <Text
           style={[
             styles.taskStatus,
-            { color: taskIconTextColor, backgroundColor: statusBgColor },
+            {
+              color: taskStyle.iconColor,
+              backgroundColor: taskStyle.bg,
+            },
           ]}
         >
           {toCapitalize(task.task_status)}
@@ -126,10 +209,83 @@ const ProjectDetailScreen = () => {
   const ListEmptyComponent = () => (
     <View style={styles.emptyContainer}>
       <Text>
-        {IS_ADMIN ? 'Tasks not added yet' : 'Task have not assigned to you yet'}
+        {IS_ADMIN || IS_PM
+          ? 'Tasks not added yet'
+          : 'Task have not assigned to you yet'}
       </Text>
     </View>
   );
+
+  const renderMember = ({ item: member }: { item: UserType }) => {
+    const memberColor =
+      member.role === RolesType.Project_Manager
+        ? {
+            text: appColors.MEMBER_PROJECT_MANAGER,
+            bg: appColors.MEMBER_PROJECT_MANAGER_BG,
+          }
+        : member.role === RolesType.Developer
+        ? {
+            text: appColors.MEMBER_DEV,
+            bg: appColors.MEMBER_DEV_BG,
+          }
+        : member.role === RolesType.Mobile_Developer
+        ? {
+            text: appColors.MEMBER_MOB_DEV,
+            bg: appColors.MEMBER_MOB_DEV_BG,
+          }
+        : member.role === RolesType.Web_Developer
+        ? {
+            text: appColors.MEMBER_WEB_DEV,
+            bg: appColors.MEMBER_WEB_DEV_BG,
+          }
+        : member.role === RolesType.QA
+        ? {
+            text: appColors.MEMBER_QA,
+            bg: appColors.MEMBER_QA_BG,
+          }
+        : member.role === RolesType.UI_UX
+        ? {
+            text: appColors.MEMBER_UI,
+            bg: appColors.MEMBER_UI_BG,
+          }
+        : member.role === RolesType.Admin
+        ? {
+            text: appColors.MEMBER_ADMIN,
+            bg: appColors.MEMBER_ADMIN_BG,
+          }
+        : {
+            text: appColors.MEMBER,
+            bg: appColors.MEMBER_BG,
+          };
+
+    return (
+      <View style={styles.memberCard}>
+        <View style={styles.profileContainer}>
+          <BaseIcon
+            name="User"
+            size={appFonts.FONT_24}
+            color={appColors.PRIMARY}
+          />
+        </View>
+        <View style={styles.detailContainer}>
+          <Text style={styles.name} numberOfLines={1}>
+            {member.id === user?.id && (
+              <Text style={{ fontWeight: 'bold' }}>{'(You)'}&nbsp;</Text>
+            )}
+            {toCapitalize(member.name)}
+          </Text>
+          <Text style={styles.email} numberOfLines={1}>
+            {member.email}
+          </Text>
+        </View>
+        <View
+          style={[styles.roleContainer, { backgroundColor: memberColor.bg }]}
+        >
+          <Text style={{ color: memberColor.text }}>{member.role}</Text>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -140,44 +296,74 @@ const ProjectDetailScreen = () => {
       ) : (
         <>
           <View style={styles.projectInfoContainer}>
+            {project.is_archived && (
+              <Text style={{ color: appColors.DANGER_TEXT }}>
+                {'This is archived project'}
+              </Text>
+            )}
             <View
-              style={[
-                styles.statusCard,
-                project?.status === 'ACTIVE'
-                  ? styles.activeStatusCard
-                  : project?.status === 'COMPLETED' &&
-                    styles.completedStatusCard,
-              ]}
+              style={{ flexDirection: 'row', justifyContent: 'space-between' }}
             >
-              <Text
+              <View
                 style={[
-                  styles.projectStatus,
-                  project?.status === 'ACTIVE'
-                    ? styles.activeStatus
-                    : project?.status === 'COMPLETED' && styles.completedStatus,
+                  styles.statusCard,
+                  project?.status === ProjectStatusType.ACTIVE
+                    ? styles.activeStatusCard
+                    : project?.status === ProjectStatusType.COMPLETED &&
+                      styles.completedStatusCard,
                 ]}
               >
-                {project?.status}
-              </Text>
+                <Text
+                  style={[
+                    styles.projectStatus,
+                    project?.status === ProjectStatusType.ACTIVE
+                      ? styles.activeStatus
+                      : project?.status === ProjectStatusType.COMPLETED &&
+                        styles.completedStatus,
+                  ]}
+                >
+                  {project?.status}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row' }}>
+                <Text
+                  style={[styles.linkText, { color: appColors.DANGER_TEXT }]}
+                  onPress={() => handleConfirm(OperationTypes.DELETE)}
+                >
+                  {'Delete'}
+                </Text>
+                <Text
+                  style={styles.linkText}
+                  onPress={() =>
+                    handleConfirm(
+                      project?.is_archived
+                        ? OperationTypes.RESTORE
+                        : OperationTypes.ARCHIVE,
+                    )
+                  }
+                >
+                  {project?.is_archived ? 'Restore' : 'Archive'}
+                </Text>
+              </View>
             </View>
             <View style={styles.projectHeaderContainer}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.title}>{project?.title}</Text>
+                <Text style={styles.title}>{toCapitalize(project?.title)}</Text>
                 <View style={styles.clientInfoContainer}>
                   <BaseIcon name="Building" />
                   <Text style={styles.clientText}>
-                    {'Client:'} {project?.client_name}
+                    {'Client:'} {toCapitalize(project?.client_name)}
                   </Text>
                 </View>
               </View>
-              <View>
+              <TouchableOpacity onPress={() => setMemberListModal(true)}>
                 <Text style={styles.descriptionTitle}>
                   {project?.member_list.length}&nbsp;
                   {(project?.member_list.length ?? 0) > 1
                     ? 'Members'
                     : 'Member'}
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -188,11 +374,8 @@ const ProjectDetailScreen = () => {
 
           <View>
             <View style={styles.taskHeaderRow}>
-              <Text style={styles.projectTask}>
-                {'Project Tasks'}&nbsp;
-                {taskList.length > 0 && `(${taskList.length})`}
-              </Text>
-              {IS_ADMIN && (
+              <Text style={styles.projectTask}>{'Project Tasks'}</Text>
+              {(IS_ADMIN || IS_PM) && !project?.is_archived && (
                 <Text
                   style={styles.newTask}
                   onPress={() =>
@@ -206,11 +389,46 @@ const ProjectDetailScreen = () => {
               )}
             </View>
             <FlatList
-              data={taskList}
+              data={taskList.slice(0, 3)}
               renderItem={renderItem}
               ListEmptyComponent={ListEmptyComponent}
+              ListFooterComponent={() =>
+                taskList.length > 3 && (
+                  <Text
+                    style={{
+                      alignSelf: 'center',
+                      margin: hp(1),
+                      color: appColors.PRIMARY,
+                    }}
+                    onPress={() => {
+                      navigation.navigate('TaskStack', {
+                        screen: 'Task',
+                        params: {
+                          projectId: project.id,
+                        },
+                      });
+                    }}
+                  >
+                    {'See more tasks'}
+                  </Text>
+                )
+              }
             />
           </View>
+
+          <BaseModal
+            visible={memberListModal}
+            onRequestClose={() => {
+              setMemberListModal(false);
+            }}
+            modalTitle="Member List"
+          >
+            {isMemberListLoading ? (
+              <BaseLoader />
+            ) : (
+              <FlatList data={memberList} renderItem={renderMember} />
+            )}
+          </BaseModal>
         </>
       )}
     </ScrollView>
@@ -255,6 +473,11 @@ const styles = StyleSheet.create({
   },
   completedStatus: {
     color: appColors.PROJECT_COMPLETED,
+  },
+  linkText: {
+    color: appColors.PRIMARY,
+    fontWeight: '500',
+    marginHorizontal: wp(2),
   },
   title: {
     fontSize: appFonts.FONT_18,
@@ -323,6 +546,41 @@ const styles = StyleSheet.create({
   },
   taskStatus: {
     paddingHorizontal: wp(2),
+    borderRadius: wp(1.5),
+  },
+  memberCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(2),
+    borderRadius: wp(3),
+    marginVertical: hp(0.5),
+    padding: wp(2),
+  },
+  profileContainer: {
+    height: wp(12),
+    width: wp(12),
+    borderRadius: wp(12),
+    backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailContainer: {
+    gap: hp(0.5),
+    flex: 1,
+  },
+  name: {
+    fontSize: appFonts.FONT_12,
+  },
+  email: {
+    fontSize: appFonts.FONT_10,
+    color: appColors.SECONDARY_TEXT,
+  },
+  roleContainer: {
+    alignSelf: 'center',
+    backgroundColor: 'red',
+    paddingVertical: wp(0.5),
+    paddingHorizontal: wp(1),
     borderRadius: wp(1.5),
   },
 });

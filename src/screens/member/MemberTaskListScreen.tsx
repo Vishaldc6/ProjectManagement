@@ -7,7 +7,13 @@ import {
   View,
 } from 'react-native';
 import React, { useEffect, useState } from 'react';
-import { onSnapshot, query, where } from '@react-native-firebase/firestore';
+import {
+  onSnapshot,
+  or,
+  orderBy,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
 import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
@@ -22,8 +28,10 @@ import { TASK_STATUS_LIST } from '../../constants';
 import { BaseLoader } from '../../components';
 import { toCapitalize } from '../../utils/helperFunctions';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
+import { useAppRoutes } from '../../hooks/useAppRoute';
 
 const MemberTaskListScreen = () => {
+  const { params } = useAppRoutes<'Task'>();
   const navigation = useAppNavigation('Task');
 
   const { user } = useAppSelector(state => state.AuthReducer);
@@ -35,12 +43,33 @@ const MemberTaskListScreen = () => {
   const [selectedStatus, setSelectedStatus] = useState('ALL');
 
   useEffect(() => {
-    let q = query(taskRef, where('assigned_to', '==', user?.id));
-    if (IS_ADMIN) {
-      q = query(taskRef);
+    console.log({ params });
+
+    let q = query(
+      taskRef,
+      where('is_archived', '==', params?.seeArchive ? true : false),
+      where('is_deleted', '==', false),
+      orderBy('created_at', 'desc'),
+    );
+    if (!IS_ADMIN) {
+      // const or_q = or(
+      //   where('assigned_to', '==', user?.id),
+      //   where('created_by', '==', user?.id),
+      // );
+      // q = q.where(or_q)
+      q = query(
+        taskRef,
+        or(
+          where('assigned_to', '==', user?.id),
+          where('created_by', '==', user?.id),
+        ),
+        where('is_archived', '==', false),
+        where('is_deleted', '==', false),
+        orderBy('created_at', 'desc'),
+      );
     }
 
-    const unsubscribe = onSnapshot(q, querySnapshot => {
+    const taskListner = onSnapshot(q, querySnapshot => {
       const tasks: TaskType[] = [];
       querySnapshot &&
         querySnapshot.forEach((doc: any) => {
@@ -52,7 +81,7 @@ const MemberTaskListScreen = () => {
     });
 
     return () => {
-      unsubscribe();
+      taskListner();
     };
   }, []);
 
@@ -121,6 +150,22 @@ const MemberTaskListScreen = () => {
     <View style={styles.container}>
       {isLoading && <BaseLoader />}
       <View>
+        {!params?.seeArchive && (
+          <Text
+            style={{
+              marginHorizontal: wp(3),
+              alignSelf: 'flex-end',
+              color: appColors.PRIMARY,
+            }}
+            onPress={() => {
+              navigation.push('Task', {
+                seeArchive: true,
+              });
+            }}
+          >
+            {'See Archive Tasks'}
+          </Text>
+        )}
         <ScrollView
           style={{ alignSelf: 'flex-start' }}
           contentContainerStyle={styles.filterContainer}

@@ -29,11 +29,19 @@ export type ProjectType = {
   status: ProjectStatusType;
   title: string;
   member_list: string[];
+  project_manager: string[];
+  created_by?: string;
   created_at?: Timestamp;
   updated_at?: Timestamp;
+  is_deleted?: boolean;
+  is_archived?: boolean;
 };
 
-export type ProjectStatusType = 'ACTIVE' | 'COMPLETED' | 'IN-ACTIVE';
+export enum ProjectStatusType {
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED',
+  IN_ACTIVE = 'IN-ACTIVE',
+}
 
 export type TaskType = {
   id: string;
@@ -44,11 +52,13 @@ export type TaskType = {
   project_id: string;
   project_title: string;
   task_status: TaskStatusEnum;
-  // comments: CommentType[];
+  // priority?:string, // enum : low, medium, high
   created_by?: string;
   file_url?: string[];
   created_at?: Timestamp;
   updated_at?: Timestamp;
+  is_deleted?: boolean;
+  is_archived?: boolean;
 };
 
 export type CommentType = {
@@ -57,7 +67,9 @@ export type CommentType = {
   author: string;
   author_id: string;
   created_at: Timestamp;
+  updated_at?: Timestamp;
   file_url?: string[];
+  is_deleted?: boolean;
 };
 
 export enum TaskStatusEnum {
@@ -67,14 +79,3 @@ export enum TaskStatusEnum {
 }
 
 export type MemberType = {} & UserType;
-
-export type MemberProjectType = {
-  id: string;
-  member_id: string;
-  project_title: string;
-  project_id: string;
-  status: ProjectStatusType;
-  client_name: string;
-  created_at?: Timestamp;
-  updated_at?: Timestamp;
-};

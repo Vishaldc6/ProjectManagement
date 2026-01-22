@@ -6,22 +6,33 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { useEffect, useState } from 'react';
-import { BaseButton, BaseIcon, BaseInput, BaseLoader } from '../../components';
+import React, { memo, useEffect, useState } from 'react';
 import {
-  heightPercentageToDP,
-  widthPercentageToDP,
+  heightPercentageToDP as hp,
+  widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
 import uuid from 'react-native-uuid';
 import { useFormik } from 'formik';
 import * as yup from 'yup';
-import { onSnapshot, query, where } from '@react-native-firebase/firestore';
+import { getDocs, or, query, where } from '@react-native-firebase/firestore';
 
+import {
+  BaseButton,
+  BaseIcon,
+  BaseInput,
+  BaseLoader,
+  BaseModal,
+} from '../../components';
 import appColors from '../../styles/appColors';
-import { MemberType, ProjectType } from '../../types/appTypes';
+import {
+  MemberType,
+  ProjectStatusType,
+  ProjectType,
+  UserType,
+} from '../../types/appTypes';
 import {
   addProject,
-  associateMemberToProject,
+  notifyMemberForProject,
 } from '../../firebase/projectCollection';
 import { userRef } from '../../firebase/userCollection';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
@@ -31,9 +42,13 @@ import { useAppSelector } from '../../hooks/reduxHooks';
 const ProjectFormScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
   const navigation = useAppNavigation('ProjectForm');
+  const [addedMemberList, setAddedMemberList] = useState<MemberType[]>(
+    user ? [user] : [],
+  );
   const [memberList, setMemberList] = useState<MemberType[]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
+  const [memberModal, setMemberModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
 
   const projectValidationSchema = yup.object({
     title: yup.string().trim().required('please enter project title'),
@@ -52,6 +67,7 @@ const ProjectFormScreen = () => {
       .array()
       .of(yup.string())
       .min(1, 'at least 1 member should be selected'),
+    project_manager: yup.object().required('please choose project manager'),
   });
 
   type InitialValueType = {
@@ -59,6 +75,8 @@ const ProjectFormScreen = () => {
     clientName: string;
     description: string;
     members: string[];
+    searchMember: string;
+    project_manager?: UserType;
   };
 
   const {
@@ -69,12 +87,15 @@ const ProjectFormScreen = () => {
     handleBlur,
     handleChange,
     setFieldValue,
+    setFieldTouched,
   } = useFormik<InitialValueType>({
     initialValues: {
       title: '',
       clientName: '',
       description: '',
-      members: [],
+      members: user ? [user?.id] : [],
+      searchMember: '',
+      project_manager: undefined,
     },
     validationSchema: projectValidationSchema,
     onSubmit: () => {
@@ -82,38 +103,70 @@ const ProjectFormScreen = () => {
     },
   });
 
+  // --- NEED TO FIX ---
   useEffect(() => {
-    const q = query(userRef, where('role', '!=', 'Admin'));
+    debouncedFunc();
+  }, [values.searchMember]);
 
-    const unsubscribe = onSnapshot(q, querySnapshot => {
-      const _memberList: MemberType[] = user ? [user] : [];
-      querySnapshot.forEach((doc: any) => {
-        _memberList.push(doc.data());
-      });
-      setMemberList(_memberList);
-      setFieldValue('members', [user?.id]);
-      setIsLoading(false);
-    });
-
-    return () => {
-      unsubscribe();
+  const debounce = (func: any, time: number) => {
+    let timeOut: number;
+    return function () {
+      clearTimeout(timeOut);
+      timeOut = setTimeout(() => {
+        func();
+      }, time);
     };
-  }, []);
+  };
+
+  const searchMemberFunc = () => {
+    const searchText = values.searchMember.toLowerCase();
+    if (searchText) {
+      setIsSearchLoading(true);
+      console.log('searchMember...');
+      const q = query(
+        userRef,
+        where('role', '!=', 'Admin'),
+        or(where('name', '==', searchText), where('email', '==', searchText)),
+      );
+      console.log({ q });
+
+      getDocs(q).then(querySnapshot => {
+        const _memberList: MemberType[] = [];
+        querySnapshot.forEach((doc: any) => {
+          _memberList.push(doc.data());
+        });
+        setMemberList(_memberList);
+        console.log({ _memberList });
+        setIsSearchLoading(false);
+
+        // setFieldValue('members', [user?.id]);
+      });
+    }
+  };
+
+  const debouncedFunc = debounce(searchMemberFunc, 2000);
 
   const handleSaveProject = async () => {
     setIsLoading(true);
     const uid = uuid.v4();
     const projectData: ProjectType = {
-      client_name: values.clientName,
+      client_name: values.clientName.toLowerCase(),
       id: uid,
       description: values.description,
-      status: 'ACTIVE',
-      title: values.title,
+      status: ProjectStatusType.ACTIVE,
+      title: values.title.toLowerCase(),
       member_list: values.members,
+      created_by: user?.id,
+      project_manager: values.project_manager
+        ? [values.project_manager?.id]
+        : [],
     };
+    console.log({ projectData });
+
     addProject(uid, projectData)
       .then(async () => {
-        await associateMemberToProject({
+        // just notify members
+        await notifyMemberForProject({
           memberIds: values.members,
           project: projectData,
         });
@@ -137,31 +190,24 @@ const ProjectFormScreen = () => {
   };
 
   const renderItem = ({ item }: { item: MemberType }) => {
-    const isSelected = values.members.includes(item.id);
+    const isPM = values.project_manager?.id === item.id;
     return (
-      <View
-        style={{
-          maxWidth: widthPercentageToDP(18),
-          alignItems: 'center',
-          marginRight: widthPercentageToDP(2),
-        }}
-      >
+      <View style={styles.memberProfileContainer}>
         <TouchableOpacity
-          onPress={() => handleSelection(item.id)}
+          onPress={() => setFieldValue('project_manager', item)}
           activeOpacity={0.8}
-          disabled={item.id === user?.id}
-          style={[styles.memberProfile, isSelected && styles.selectedMember]}
+          style={[styles.memberProfile, isPM && styles.selectedMember]}
         >
           <BaseIcon
             name="User"
             size={appFonts.FONT_24}
-            color={isSelected ? appColors.PRIMARY : appColors.BORDER}
+            color={isPM ? appColors.PRIMARY : appColors.BORDER}
           />
         </TouchableOpacity>
         <Text
           style={{
             ...styles.memberdDetails,
-            color: isSelected ? appColors.PRIMARY : appColors.PRIMARY_TEXT,
+            color: isPM ? appColors.PRIMARY : appColors.PRIMARY_TEXT,
           }}
           numberOfLines={2}
         >
@@ -170,7 +216,7 @@ const ProjectFormScreen = () => {
         <Text
           style={{
             ...styles.memberdDetails,
-            color: isSelected ? appColors.PRIMARY : appColors.SECONDARY_TEXT,
+            color: isPM ? appColors.PRIMARY : appColors.SECONDARY_TEXT,
           }}
           numberOfLines={2}
         >
@@ -180,7 +226,31 @@ const ProjectFormScreen = () => {
     );
   };
 
-  const ListEmptyComponent = () => <Text>{'Members not found'}</Text>;
+  const ListEmptyComponent = memo(() => <Text>{'Members not found'}</Text>);
+
+  const ListHeaderComponent = memo(() => {
+    return (
+      <TouchableOpacity
+        style={styles.memberProfileContainer}
+        onPress={toggleModal}
+      >
+        <View style={[styles.memberProfile]}>
+          <BaseIcon
+            name="Plus"
+            size={appFonts.FONT_24}
+            color={appColors.BORDER}
+          />
+        </View>
+        <Text style={styles.memberdDetails} numberOfLines={2}>
+          {'Add member'}
+        </Text>
+      </TouchableOpacity>
+    );
+  });
+
+  const toggleModal = () => {
+    setMemberModal(!memberModal);
+  };
 
   return (
     <View style={styles.container}>
@@ -217,37 +287,107 @@ const ProjectFormScreen = () => {
           touched.description && errors.description ? errors.description : ''
         }
         style={{
-          height: heightPercentageToDP(15),
+          height: hp(15),
           textAlignVertical: 'top',
         }}
       />
       <View style={styles.memberSelectionRow}>
-        <Text style={styles.fieldTitle}>{'Team Members'}</Text>
-        {values.members.length && (
-          <Text
-            style={styles.selectedText}
-          >{`${values.members.length} selected`}</Text>
-        )}
+        <Text style={styles.fieldTitle}>
+          {'Team Members'}&nbsp;({values.members.length})
+        </Text>
       </View>
       <View>
         <FlatList
-          data={memberList}
+          data={addedMemberList}
           renderItem={renderItem}
           horizontal
-          ListEmptyComponent={ListEmptyComponent}
+          ListHeaderComponent={ListHeaderComponent}
         />
       </View>
-      {touched.members && errors.members && (
+      {errors.members && (
         <Text style={styles.errorMessage}>{errors.members}</Text>
+      )}
+      <View style={styles.memberSelectionRow}>
+        <Text style={styles.fieldTitle}>{'Project Manager'}</Text>
+        <Text style={styles.selectedText}>
+          {values.project_manager?.name ?? 'No project manager'}
+        </Text>
+      </View>
+      {touched.project_manager && errors.project_manager && (
+        <Text style={styles.errorMessage}>
+          {errors.project_manager.toString()}
+        </Text>
       )}
 
       <BaseButton
         title="Save Project"
-        onPress={handleSubmit}
+        onPress={() => {
+          setFieldTouched('project_manager', true);
+          handleSubmit();
+        }}
         style={{
-          marginVertical: heightPercentageToDP(2),
+          marginVertical: hp(2),
         }}
       />
+      <BaseModal
+        visible={memberModal}
+        onRequestClose={toggleModal}
+        modalTitle={'Add new member'}
+      >
+        <BaseInput
+          placeholder="Search member by name or email"
+          value={values.searchMember}
+          onChangeText={handleChange('searchMember')}
+        />
+
+        {isSearchLoading ? (
+          <BaseLoader />
+        ) : (
+          <FlatList
+            data={memberList}
+            renderItem={({ item }) => {
+              const isAdded = addedMemberList.find(({ id }) => id === item.id);
+              return (
+                <View
+                  style={{
+                    padding: wp(1),
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderRadius: wp(2),
+                    marginBottom: hp(1),
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                  }}
+                >
+                  <View
+                    style={{
+                      flex: 1,
+                    }}
+                  >
+                    <Text>{item.name}</Text>
+                    <Text>{item.email}</Text>
+                  </View>
+                  <BaseIcon
+                    name={isAdded ? 'Check' : 'Plus'}
+                    color={appColors.PRIMARY}
+                    onPress={() => {
+                      // manage formik value
+                      handleSelection(item.id);
+
+                      // manage list
+                      setAddedMemberList(prev =>
+                        isAdded
+                          ? prev.filter(({ id }) => item.id !== id)
+                          : [...prev, item],
+                      );
+                    }}
+                  />
+                </View>
+              );
+            }}
+            ListEmptyComponent={ListEmptyComponent}
+          />
+        )}
+      </BaseModal>
     </View>
   );
 };
@@ -257,8 +397,8 @@ export default ProjectFormScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: widthPercentageToDP(3),
-    gap: heightPercentageToDP(1.5),
+    padding: wp(3),
+    gap: hp(1.5),
   },
   memberSelectionRow: { flexDirection: 'row', justifyContent: 'space-between' },
   fieldTitle: {
@@ -267,10 +407,15 @@ const styles = StyleSheet.create({
   selectedText: {
     color: appColors.PRIMARY,
   },
+  memberProfileContainer: {
+    maxWidth: wp(18),
+    alignItems: 'center',
+    marginRight: wp(1),
+  },
   memberProfile: {
-    width: widthPercentageToDP(15),
-    height: widthPercentageToDP(15),
-    borderRadius: widthPercentageToDP(15),
+    width: wp(15),
+    height: wp(15),
+    borderRadius: wp(15),
     borderWidth: 2,
     borderColor: appColors.BORDER,
     alignItems: 'center',

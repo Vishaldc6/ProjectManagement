@@ -18,7 +18,7 @@ interface BaseDropDownPropType {
 }
 
 const BaseDropDown = (
-  props: BaseDropDownPropType & DropdownProps<MemberType>,
+  props: BaseDropDownPropType & DropdownProps<MemberType|any>,
 ) => {
   return (
     <View style={[styles.baseContainer, props.containerStyle]}>

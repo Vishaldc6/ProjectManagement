@@ -14,24 +14,20 @@ export type DrawerNavigatorType = {
 };
 
 export type ProjectStackNavigatorType = {
-  Project: undefined;
+  Project: { seeArchive?: boolean } | undefined;
   ProjectDetail: { id: string };
   ProjectForm: { id: string } | undefined;
   TaskForm: {
-    project?: ProjectType;
     projectId?: string;
-    taskId?: string;
     task?: TaskType;
   };
 };
 
 export type TaskStackNavigatorType = {
-  Task: undefined;
+  Task: { seeArchive?: boolean; projectId?: string } | undefined;
   TaskDetail: { id: string };
   TaskForm: {
-    project?: ProjectType;
     projectId?: string;
-    taskId?: string;
     task?: TaskType;
   };
 };

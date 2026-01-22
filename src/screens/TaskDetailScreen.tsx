@@ -1,14 +1,19 @@
 import {
   Alert,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
@@ -28,6 +33,7 @@ import {
   addComment,
   getTask,
   tasksCommentsRef,
+  updateTask,
 } from '../firebase/taskCollection';
 import { CommentType, TaskStatusEnum, TaskType } from '../types/appTypes';
 import appColors from '../styles/appColors';
@@ -36,6 +42,7 @@ import {
   BaseHtmlText,
   BaseIcon,
   BaseLoader,
+  BaseModal,
   BaseRichTextInput,
 } from '../components';
 import {
@@ -65,7 +72,7 @@ const TaskDetailScreen = () => {
   const [isAddCmtLoading, setIsAddCmtLoading] = useState(false);
   const [viewImage, setViewImage] = useState(false);
 
-  const IS_ADMIN = user?.role === 'Admin';
+  const TASK_OWNER = useMemo(() =>  task?.created_by === user?.id, [task]);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,6 +83,7 @@ const TaskDetailScreen = () => {
         })
         .catch(er => {
           console.log({ er });
+          setIsLoading(false);
         });
     }, []),
   );
@@ -128,7 +136,9 @@ const TaskDetailScreen = () => {
             task_id: task?.id,
           },
           title: 'New Comment',
-          user_id: IS_ADMIN ? task?.assigned_to ?? '' : task?.created_by ?? '',
+          user_id: TASK_OWNER
+            ? task?.assigned_to ?? ''
+            : task?.created_by ?? '',
         });
         setIsAddCmtLoading(false);
         toggleModal();
@@ -144,6 +154,35 @@ const TaskDetailScreen = () => {
 
   const toggleModal = () => setModelVisible(!modelVisible);
 
+  const handleConfirm = (type: 'ARCHIVE' | 'DELETE' | 'RESTORE') => {
+    const title = type === 'ARCHIVE' ? 'Task Archive' : 'Task Delete';
+    const msg =
+      type === 'ARCHIVE'
+        ? 'Are you sure to archive this task?'
+        : 'Are you sure to delete this task?';
+    Alert.alert(title, msg, [
+      {
+        text: 'No',
+      },
+      {
+        text: 'Yes',
+        onPress: () => handleOperation(type),
+      },
+    ]);
+  };
+
+  const handleOperation = (operation: 'ARCHIVE' | 'DELETE' | 'RESTORE') => {
+    setIsLoading(true);
+    const data: Partial<TaskType> =
+      operation === 'DELETE'
+        ? { is_deleted: true }
+        : { is_archived: operation === 'ARCHIVE' ? true : false };
+    updateTask(task?.id ?? '', data).then(() => {
+      setIsLoading(false);
+      navigation.goBack();
+    });
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {isLoading ? (
@@ -153,28 +192,50 @@ const TaskDetailScreen = () => {
       ) : (
         <>
           <View style={styles.statusHeaderContainer}>
-            <Text
-              style={[
-                styles.taskStatus,
-                {
-                  color: taskColor.iconText,
-                  backgroundColor: taskColor.background,
-                },
-              ]}
-            >
-              {task?.task_status && toCapitalize(task?.task_status)}
-            </Text>
-            <Text
-              style={styles.linkText}
-              onPress={() => {
-                navigation.navigate('TaskForm', {
-                  task: task,
-                  projectId: task?.project_id,
-                });
-              }}
-            >
-              {IS_ADMIN ? 'Edit' : 'Update Status'}
-            </Text>
+            <View style={{}}>
+              <Text
+                style={[
+                  styles.taskStatus,
+                  {
+                    color: taskColor.iconText,
+                    backgroundColor: taskColor.background,
+                  },
+                ]}
+              >
+                {task?.task_status && toCapitalize(task?.task_status)}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              {TASK_OWNER && (
+                <>
+                  <Text
+                    style={[styles.linkText, { color: appColors.DANGER_TEXT }]}
+                    onPress={() => handleConfirm('DELETE')}
+                  >
+                    {'Delete'}
+                  </Text>
+                  <Text
+                    style={styles.linkText}
+                    onPress={() =>
+                      handleConfirm(task?.is_archived ? 'RESTORE' : 'ARCHIVE')
+                    }
+                  >
+                    {task?.is_archived ? 'Restore' : 'Archive'}
+                  </Text>
+                </>
+              )}
+              <Text
+                style={styles.linkText}
+                onPress={() => {
+                  navigation.navigate('TaskForm', {
+                    task: task,
+                    projectId: task?.project_id,
+                  });
+                }}
+              >
+                {TASK_OWNER ? 'Edit' : 'Update Status'}
+              </Text>
+            </View>
           </View>
           <Text style={styles.taskTitle}>{task?.title}</Text>
           <View style={styles.projectRow}>
@@ -259,38 +320,30 @@ const TaskDetailScreen = () => {
           )}
         </>
       )}
-      <Modal
-        animationType="slide"
-        backdropColor={appColors.LOADER_BACKGROUND}
+      <BaseModal
         visible={modelVisible}
         onRequestClose={toggleModal}
-        statusBarTranslucent
+        modalTitle="Add Comment"
       >
-        <View style={styles.modalView}>
-          <View style={styles.modalContentView}>
-            {isAddCmtLoading && <BaseLoader />}
-            <BaseIcon name="X" style={styles.closeIcon} onPress={toggleModal} />
-            <Text style={styles.modalTitle}>{'Add Comment'}</Text>
-            <BaseRichTextInput
-              ref={richTextRef}
-              initialContentHTML={comment}
-              title="Comment"
-              onChange={text => setComment(text)}
-              placeholder="Enter Task Comment"
-              shouldAddFile
-              onFileSelect={res => {
-                res && setFiles([res]);
-              }}
-            />
-            <BaseButton
-              title="Add Comment"
-              onPress={handleAddComment}
-              style={{ width: wp(82), marginTop: hp(2) }}
-              disabled={!comment.trim().length}
-            />
-          </View>
-        </View>
-      </Modal>
+        {isAddCmtLoading && <BaseLoader />}
+        <BaseRichTextInput
+          ref={richTextRef}
+          initialContentHTML={comment}
+          title="Comment"
+          onChange={text => setComment(text)}
+          placeholder="Enter Task Comment"
+          shouldAddFile
+          onFileSelect={res => {
+            res && setFiles([res]);
+          }}
+        />
+        <BaseButton
+          title="Add Comment"
+          onPress={handleAddComment}
+          style={{ width: wp(82), marginTop: hp(2) }}
+          disabled={!comment.trim().length}
+        />
+      </BaseModal>
     </ScrollView>
   );
 };
@@ -311,7 +364,7 @@ const styles = StyleSheet.create({
   linkText: {
     color: appColors.PRIMARY,
     fontWeight: '500',
-    marginHorizontal: wp(3),
+    marginHorizontal: wp(2),
   },
   taskStatus: {
     alignSelf: 'flex-start',

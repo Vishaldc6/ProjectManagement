@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   FlatList,
   Modal,
   StyleSheet,
@@ -6,21 +7,25 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
 } from 'react-native-responsive-screen';
 import {
-  onSnapshot,
+  FieldPath,
+  FirebaseFirestoreTypes,
+  getDocs,
+  limit,
   orderBy,
   query,
   where,
 } from '@react-native-firebase/firestore';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { useAppNavigation } from '../hooks/useAppNavigation';
 import { projectRef } from '../firebase/projectCollection';
-import { ProjectType } from '../types/appTypes';
+import { ProjectStatusType, ProjectType } from '../types/appTypes';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import {
@@ -28,78 +33,147 @@ import {
   BaseIcon,
   BaseInput,
   BaseLoader,
+  BaseModal,
 } from '../components';
 import { PROJECT_STATUS_LIST } from '../constants';
 import { toCapitalize } from '../utils/helperFunctions';
 import { useAppSelector } from '../hooks/reduxHooks';
+import { useAppRoutes } from '../hooks/useAppRoute';
 
 const ProjectScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
+  const { params } = useAppRoutes<'Project'>();
   const navigation = useAppNavigation('Project');
 
   const IS_ADMIN = user?.role === 'Admin';
   const [isLoading, setIsLoading] = useState(true);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [projectList, setProjectList] = useState<ProjectType[]>([]);
+  const [searchProjectList, setSearchProjectList] = useState<ProjectType[]>([]);
   const [isModalVisiable, setIsModalVisiable] = useState(false);
   const [searchText, setSearchText] = useState<string>('');
   const [selectedFilter, setSelectedFilter] = useState<string>('ALL');
-  const [filterProjectList, setFilterProjectList] = useState<ProjectType[]>();
 
-  useEffect(() => {
-    let q;
+  const PROJECT_PAGE_SIZE = 10;
+  const SEARCHED_PROJECT_PAGE_SIZE = 10;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<
+    FirebaseFirestoreTypes.QueryDocumentSnapshot | undefined
+  >(undefined);
+  const [searchedLastDoc, setSearchedLastDoc] = useState<
+    FirebaseFirestoreTypes.QueryDocumentSnapshot | undefined
+  >(undefined);
+  const [hasMoreResult, setHasMoreResult] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData(true);
+    }, []),
+  );
+
+  const loadData = async (init = false) => {
+    let q = query(
+      projectRef,
+      where('is_archived', '==', !!params?.seeArchive),
+      where('is_deleted', '==', false),
+      orderBy('updated_at', 'desc'),
+      limit(PROJECT_PAGE_SIZE),
+    );
     if (IS_ADMIN) {
-      q = query(projectRef, orderBy('updated_at', 'desc'));
+      q = q.where(new FieldPath('created_by'), '==', user?.id);
     } else {
-      q = query(
-        projectRef,
-        where('member_list', 'array-contains', user?.id),
-        orderBy('updated_at', 'desc'),
-      );
+      q = q.where(new FieldPath('member_list'), 'array-contains', user?.id);
     }
 
-    const unsubscribe = onSnapshot(q, querySnapshot => {
-      const projects: ProjectType[] = [];
-      querySnapshot &&
-        querySnapshot.forEach((doc: any) => projects.push(doc.data()));
-      setProjectList(projects);
-      setFilterProjectList(projects);
-      setIsLoading(false);
-    });
+    if (lastDoc && !init) {
+      q = q.startAfter(lastDoc);
+    }
 
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    const querySnapshot: FirebaseFirestoreTypes.QuerySnapshot = await getDocs(
+      q,
+    );
+
+    const projects: ProjectType[] = [];
+    if (querySnapshot) {
+      querySnapshot.forEach((doc: any) => projects.push(doc.data()));
+      setLastDoc(querySnapshot.docs.at(-1));
+      setHasMore(querySnapshot.docs.length === PROJECT_PAGE_SIZE);
+    }
+
+    setProjectList(prev => (init ? projects : [...prev, ...projects]));
+    setIsLoading(false);
+    setIsRefreshing(false);
+  };
 
   useEffect(() => {
-    let list = projectList;
-    if (searchText) {
-      list = list.filter(
-        proj =>
-          proj.title.toLowerCase().startsWith(searchText.toLowerCase()) ||
-          (IS_ADMIN
-            ? proj.client_name
-                .toLowerCase()
-                .startsWith(searchText.toLowerCase())
-            : false),
-      );
-    }
-    if (selectedFilter !== 'ALL') {
-      list = list.filter(
-        proj => proj.status.toLowerCase() === selectedFilter.toLowerCase(),
-      );
-    }
-    setFilterProjectList(list);
+    searchText.trim().length || selectedFilter !== 'ALL'
+      ? loadSearchData()
+      : loadData(true);
   }, [searchText, selectedFilter]);
 
-  const renderProject = ({ item }: { item: ProjectType }) => {
+  const loadSearchData = (next = false) => {
+    setIsSearchLoading(true);
+    let q = query(
+      projectRef,
+      where('is_archived', '==', !!params?.seeArchive),
+      where('is_deleted', '==', false),
+      where('title', '>=', searchText.trim().toLowerCase()),
+      where('title', '<=', searchText.trim().toLowerCase() + '\uf8ff'),
+      orderBy('title'),
+      limit(SEARCHED_PROJECT_PAGE_SIZE),
+    );
+    if (selectedFilter != 'ALL') {
+      q = q.where(new FieldPath('status'), '==', selectedFilter);
+    }
+    if (next && searchedLastDoc) {
+      q = q.startAfter(searchedLastDoc);
+    }
+    console.log({ q });
+
+    const result: ProjectType[] = [];
+    getDocs(q).then(querySnapshot => {
+      console.log({ querySnapshot });
+
+      if (querySnapshot) {
+        querySnapshot.forEach((doc: any) => result.push(doc.data()));
+        console.log({ result });
+        setSearchProjectList(prev => (next ? [...prev, ...result] : result));
+        setSearchedLastDoc(querySnapshot.docs.at(-1));
+        setHasMoreResult(
+          querySnapshot.docs.length === SEARCHED_PROJECT_PAGE_SIZE,
+        );
+      }
+    });
+    setIsSearchLoading(false);
+  };
+
+  const onRefresh = () => {
+    setSearchText('');
+    setSelectedFilter('ALL');
+    setSearchedLastDoc(undefined);
+    setHasMoreResult(false);
+    setSearchProjectList([]);
+
+    setLastDoc(undefined);
+    setIsRefreshing(true);
+    loadData(true);
+  };
+
+  console.log('resultList: ', {
+    searchedLastDoc,
+    hasMoreResult,
+    searchProjectList,
+  });
+
+  const AdminProjectCard = memo(({ project }: { project: ProjectType }) => {
     return (
       <TouchableOpacity
         activeOpacity={0.8}
         style={styles.projectCard}
         onPress={() =>
           navigation.navigate('ProjectDetail', {
-            id: item.id,
+            id: project.id,
           })
         }
       >
@@ -108,32 +182,32 @@ const ProjectScreen = () => {
         </View>
         <View style={styles.projectDetail}>
           <Text style={styles.title} numberOfLines={1}>
-            {item.title}
+            {toCapitalize(project.title)}
           </Text>
           <Text style={styles.client} numberOfLines={1}>
-            {item.client_name}
+            {toCapitalize(project.client_name)}
           </Text>
         </View>
         <BaseIcon name="ChevronRight" color={appColors.BORDER} />
       </TouchableOpacity>
     );
-  };
+  });
 
-  const renderMemberProject = ({ item }: { item: ProjectType }) => {
+  const MemberProjectCard = memo(({ project }: { project: ProjectType }) => {
     return (
       <TouchableOpacity
         activeOpacity={0.8}
         style={styles.memberProjectCard}
         onPress={() =>
           navigation.navigate('ProjectDetail', {
-            id: item.id,
+            id: project.id,
           })
         }
       >
         <View style={styles.memberProjectSubCard}>
           <View style={styles.memberProjectInfo}>
             <Text style={styles.title} numberOfLines={1}>
-              {item.title}
+              {toCapitalize(project.title)}
             </Text>
             <View style={styles.clientInfoContainer}>
               <BaseIcon
@@ -142,7 +216,7 @@ const ProjectScreen = () => {
                 size={appFonts.FONT_18}
               />
               <Text style={styles.client} numberOfLines={1}>
-                {item?.client_name}
+                {toCapitalize(project?.client_name)}
               </Text>
             </View>
           </View>
@@ -152,41 +226,67 @@ const ProjectScreen = () => {
         <View
           style={[
             styles.statusCard,
-            item?.status === 'ACTIVE'
+            project?.status === ProjectStatusType.ACTIVE
               ? styles.activeStatusCard
-              : item?.status === 'COMPLETED' && styles.completedStatusCard,
+              : project?.status === ProjectStatusType.COMPLETED &&
+                styles.completedStatusCard,
           ]}
         >
           <Text
             style={[
               styles.projectStatus,
-              item?.status === 'ACTIVE'
+              project?.status === ProjectStatusType.ACTIVE
                 ? styles.activeStatus
-                : item?.status === 'COMPLETED' && styles.completedStatus,
+                : project?.status === ProjectStatusType.COMPLETED &&
+                  styles.completedStatus,
             ]}
           >
-            {toCapitalize(item?.status)}
+            {toCapitalize(project?.status)}
           </Text>
         </View>
       </TouchableOpacity>
     );
+  });
+
+  const renderProject = ({ item }: { item: ProjectType }) => {
+    return IS_ADMIN ? (
+      <AdminProjectCard project={item} />
+    ) : (
+      <MemberProjectCard project={item} />
+    );
   };
 
-  const ListEmptyComponent = () => (
+  const ListEmptyComponent = memo(() => (
     <View style={styles.emptyContainer}>
-      <Text>
-        {filterProjectList?.length === 0 && searchText
-          ? IS_ADMIN
-            ? 'Searched project or client not found'
-            : 'Searched project not found'
-          : 'Projects not found!'}
-      </Text>
+      {isSearchLoading ? (
+        <ActivityIndicator />
+      ) : (
+        <Text>
+          {(projectList?.length === 0 || searchProjectList?.length === 0) &&
+          searchText.trim().length
+            ? IS_ADMIN
+              ? 'Searched project or client not found'
+              : 'Searched project not found'
+            : 'Projects not found!'}
+        </Text>
+      )}
     </View>
-  );
+  ));
 
-  const toggleModal = () => {
-    setIsModalVisiable(!isModalVisiable);
-  };
+  const listHeaderTitle = useMemo(() => {
+    let title = params?.seeArchive ? 'Archived Projects' : 'Projects';
+    return searchText.trim().length
+      ? `Searched ${title}`
+      : selectedFilter !== 'ALL'
+      ? `Filtered ${title} (by ${toCapitalize(selectedFilter)})`
+      : `All ${title}`;
+  }, [searchText, selectedFilter]);
+
+  const ListHeaderComponent = memo(() => (
+    <Text style={styles.listHeader}>{listHeaderTitle}</Text>
+  ));
+
+  const toggleModal = () => setIsModalVisiable(!isModalVisiable);
 
   return (
     <View style={styles.container}>
@@ -211,58 +311,85 @@ const ProjectScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        contentContainerStyle={styles.listContainer}
-        data={filterProjectList}
-        renderItem={IS_ADMIN ? renderProject : renderMemberProject}
-        ListEmptyComponent={ListEmptyComponent}
-      />
+      {isSearchLoading ? (
+        <BaseLoader />
+      ) : (
+        <FlatList
+          initialNumToRender={PROJECT_PAGE_SIZE}
+          contentContainerStyle={styles.listContainer}
+          data={
+            searchText.trim().length || selectedFilter !== 'ALL'
+              ? searchProjectList
+              : projectList
+          }
+          renderItem={renderProject}
+          ListEmptyComponent={ListEmptyComponent}
+          onEndReachedThreshold={0.5}
+          onEndReached={() => {
+            hasMore ? loadData() : hasMoreResult && loadSearchData(true);
+          }}
+          ListFooterComponent={() =>
+            (hasMore || hasMoreResult) && <ActivityIndicator />
+          }
+          ListHeaderComponent={ListHeaderComponent}
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          overScrollMode="always"
+          alwaysBounceVertical
+        />
+      )}
 
-      {IS_ADMIN && (
+      {IS_ADMIN && !params?.seeArchive && (
         <BaseFloatingButton
           name="Plus"
           onPress={() => navigation.navigate('ProjectForm')}
         />
       )}
 
-      <Modal
-        animationType="slide"
-        backdropColor={appColors.LOADER_BACKGROUND}
+      <BaseModal
         visible={isModalVisiable}
         onRequestClose={toggleModal}
-        statusBarTranslucent
+        backDropContainerStyle={styles.backDropContainerStyle}
+        modalContainerStyle={styles.modalContainerStyle}
+        modalTitle="Filter Project by status"
       >
-        <View style={styles.modalView}>
-          <View style={styles.modalContentView}>
-            <BaseIcon name="X" style={styles.closeIcon} onPress={toggleModal} />
-            <Text style={styles.modalTitle}>{'Filter Project by status'}</Text>
-            <View style={styles.filterList}>
-              {['ALL', ...PROJECT_STATUS_LIST].map(status => (
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    setSelectedFilter(status);
-                    toggleModal();
-                  }}
-                  style={[
-                    styles.filterStatusContainer,
-                    selectedFilter === status && styles.selectedStatusContainer,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.filterStatus,
-                      selectedFilter === status && styles.selectedFilterStatus,
-                    ]}
-                  >
-                    {toCapitalize(status)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+        <View style={styles.filterList}>
+          {PROJECT_STATUS_LIST.map(status => (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setSelectedFilter(status);
+                toggleModal();
+              }}
+              style={[
+                styles.filterStatusContainer,
+                selectedFilter === status && styles.selectedStatusContainer,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.filterStatus,
+                  selectedFilter === status && styles.selectedFilterStatus,
+                ]}
+              >
+                {toCapitalize(status)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {!params?.seeArchive && (
+            <Text
+              style={styles.linkText}
+              onPress={() =>
+                navigation.push('Project', {
+                  seeArchive: true,
+                })
+              }
+            >
+              {'See Archive'}
+            </Text>
+          )}
         </View>
-      </Modal>
+      </BaseModal>
     </View>
   );
 };
@@ -285,7 +412,7 @@ const styles = StyleSheet.create({
     borderRadius: wp(2),
   },
   listContainer: {
-    paddingTop: hp(2),
+    flexGrow: 1,
     paddingBottom: hp(5),
   },
   projectCard: {
@@ -379,14 +506,12 @@ const styles = StyleSheet.create({
     bottom: hp(5),
     right: wp(5),
   },
-  modalView: {
-    flex: 1,
+  backDropContainerStyle: {
     justifyContent: 'flex-end',
   },
-  modalContentView: {
-    backgroundColor: appColors.SECONDARY_BACKGROUND,
-    padding: wp(4),
-    paddingBottom: hp(4),
+  modalContainerStyle: {
+    borderRadius: 0,
+    margin: 0,
     borderTopRightRadius: wp(3),
     borderTopLeftRadius: wp(3),
   },
@@ -399,10 +524,10 @@ const styles = StyleSheet.create({
   },
   filterList: {
     flexDirection: 'row',
-    // justifyContent: 'space-between',
     marginVertical: hp(1.5),
     gap: wp(3),
     flexWrap: 'wrap',
+    alignItems: 'center',
   },
   filterStatusContainer: {
     borderWidth: 1,
@@ -418,5 +543,10 @@ const styles = StyleSheet.create({
   },
   selectedFilterStatus: {
     color: appColors.PRIMARY,
+  },
+  listHeader: { marginHorizontal: wp(3), fontWeight: '500' },
+  linkText: {
+    color: appColors.PRIMARY,
+    textDecorationLine: 'underline',
   },
 });

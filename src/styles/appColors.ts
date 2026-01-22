@@ -30,6 +30,7 @@ export default {
   TASK_IN_PROGRESS_BG: '#007fe660',
   TASK_DONE_BG: '#00ba8260',
 
+  MEMBER: '#515aff',
   MEMBER_ADMIN: '#9239ff',
   MEMBER_PROJECT_MANAGER: '#007ee6',
   MEMBER_UI: '#fffb24',
@@ -38,6 +39,7 @@ export default {
   MEMBER_WEB_DEV: '#ff447c',
   MEMBER_DEV: '#91a1b5',
 
+  MEMBER_BG: '#515aff60',
   MEMBER_ADMIN_BG: '#9239ff60',
   MEMBER_PROJECT_MANAGER_BG: '#007ee660',
   MEMBER_UI_BG: '#fffb2460',

@@ -9,6 +9,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
 } from '@react-native-firebase/firestore';
 import uuid from 'react-native-uuid';
@@ -51,6 +52,14 @@ export const getTask = async (taskId: string) => {
   const docSnap = await getDoc(doc(taskRef, taskId));
   const task = docSnap.data() as TaskType;
   return task;
+};
+
+// update task
+export const updateTask = async (
+  docId: string,
+  taskData: Partial<TaskType>,
+) => {
+  await updateDoc(doc(taskRef, docId), taskData);
 };
 
 // task and comment collection

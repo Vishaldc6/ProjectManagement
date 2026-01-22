@@ -139,7 +139,7 @@ const LoginScreen = () => {
         if (signedUser.additionalUserInfo?.isNewUser) {
           const userData: UserType = {
             id: signedUser.user.uid,
-            name: signedUser.user.displayName ?? '',
+            name: (signedUser.user.displayName ?? '').toLowerCase(),
             email: signedUser.user.email ?? '',
             role: role,
             created_at: serverTimestamp() as Timestamp,
@@ -170,7 +170,9 @@ const LoginScreen = () => {
 
             const userData: UserType = {
               id: credentials.user.uid,
-              name: credentials.user.displayName ?? values.fullname,
+              name: (
+                credentials.user.displayName ?? values.fullname
+              ).toLowerCase(),
               email: credentials.user.email ?? '',
               role: role,
               created_at: serverTimestamp() as Timestamp,
@@ -188,10 +190,15 @@ const LoginScreen = () => {
                 'Sign in',
                 'Provided email address is already in use!',
               );
-            }
-
-            if (error.code === 'auth/invalid-email') {
+            } else if (error.code === 'auth/invalid-email') {
               Alert.alert('Sign in', 'Provided email address is invalid!');
+            } else if (error.code === 'auth/network-request-failed') {
+              Alert.alert(
+                'Sign in',
+                'Network request failed, please check internet!',
+              );
+            } else {
+              Alert.alert('Sign in', 'Something went wrong!');
             }
           });
       } else {

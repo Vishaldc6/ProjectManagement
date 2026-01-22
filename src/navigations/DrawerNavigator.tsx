@@ -10,6 +10,7 @@ import TaskStackNavigator from './TaskStackNavigator';
 import { requestUserPermission } from '../utils/helperFunctions';
 import { messagingApp } from '../firebase';
 import { updateUser } from '../firebase/userCollection';
+import ProfileScreen from '../screens/ProfileScreen';
 
 const Drawer = createDrawerNavigator<DrawerNavigatorType>();
 
@@ -67,6 +68,14 @@ const DrawerNavigator = () => {
           component={MemberListScreen}
         />
       )}
+      <Drawer.Screen
+        name="Profile"
+        options={{
+          drawerLabel: 'Profile',
+          title: 'Profile',
+        }}
+        component={ProfileScreen}
+      />
     </Drawer.Navigator>
   );
 };
