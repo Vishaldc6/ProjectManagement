@@ -1,8 +1,8 @@
 import { Timestamp } from '@react-native-firebase/firestore';
 import { AuthorizationStatus } from '@react-native-firebase/messaging';
 import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { RolesType } from '../types/appTypes';
 import { messagingApp } from '../firebase';
 
 export const toCapitalize = (text: string) => {
@@ -39,10 +39,17 @@ export const convertToDate = (timestamp?: Timestamp) => {
   return date;
 };
 
-const ADMIN_EMAIL_LIST = ['vishalchaudharee8@gmail.com'];
+export const saveToStorage = async (key: string, value: any) => {
+  JSON.stringify(value) &&
+    (await AsyncStorage.setItem(key, JSON.stringify(value)));
+};
 
-export const setUserRole = (email: string): RolesType => {
-  return ADMIN_EMAIL_LIST.includes(email) ? 'Admin' : 'Developer';
+export const fetchFromStorage = async (key: string) => {
+  let result;
+  AsyncStorage.getItem('AUTH_USER').then(res => {
+    result = res;
+  });
+  return result;
 };
 
 // request user for notification permission
