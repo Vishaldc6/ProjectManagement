@@ -1,11 +1,13 @@
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import React, { memo } from 'react';
+
 import appColors from '../styles/appColors';
+import BaseIndicator from './BaseIndicator';
 
 const BaseLoader = () => {
   return (
     <View style={styles.indicatorContainer}>
-      <ActivityIndicator size={'large'} color={appColors.PRIMARY} />
+      <BaseIndicator />
     </View>
   );
 };

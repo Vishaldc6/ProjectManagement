@@ -325,26 +325,28 @@ const ProjectDetailScreen = () => {
                   {project?.status}
                 </Text>
               </View>
-              <View style={{ flexDirection: 'row' }}>
-                <Text
-                  style={[styles.linkText, { color: appColors.DANGER_TEXT }]}
-                  onPress={() => handleConfirm(OperationTypes.DELETE)}
-                >
-                  {'Delete'}
-                </Text>
-                <Text
-                  style={styles.linkText}
-                  onPress={() =>
-                    handleConfirm(
-                      project?.is_archived
-                        ? OperationTypes.RESTORE
-                        : OperationTypes.ARCHIVE,
-                    )
-                  }
-                >
-                  {project?.is_archived ? 'Restore' : 'Archive'}
-                </Text>
-              </View>
+              {IS_ADMIN && (
+                <View style={{ flexDirection: 'row' }}>
+                  <Text
+                    style={[styles.linkText, { color: appColors.DANGER_TEXT }]}
+                    onPress={() => handleConfirm(OperationTypes.DELETE)}
+                  >
+                    {'Delete'}
+                  </Text>
+                  <Text
+                    style={styles.linkText}
+                    onPress={() =>
+                      handleConfirm(
+                        project?.is_archived
+                          ? OperationTypes.RESTORE
+                          : OperationTypes.ARCHIVE,
+                      )
+                    }
+                  >
+                    {project?.is_archived ? 'Restore' : 'Archive'}
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={styles.projectHeaderContainer}>
               <View style={{ flex: 1 }}>

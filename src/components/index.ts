@@ -3,6 +3,7 @@ import BaseDropDown from './BaseDropDown';
 import BaseFloatingButton from './BaseFloatingButton';
 import BaseHtmlText from './BaseHtmlText';
 import BaseIcon from './BaseIcon';
+import BaseIndicator from './BaseIndicator';
 import BaseInput from './BaseInput';
 import BaseLoader from './BaseLoader';
 import BaseModal from './BaseModal';
@@ -18,4 +19,5 @@ export {
   BaseRichTextInput,
   BaseHtmlText,
   BaseModal,
+  BaseIndicator,
 };

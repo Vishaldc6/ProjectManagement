@@ -31,6 +31,7 @@ import appFonts from '../styles/appFonts';
 import {
   BaseFloatingButton,
   BaseIcon,
+  BaseIndicator,
   BaseInput,
   BaseLoader,
   BaseModal,
@@ -49,7 +50,6 @@ const ProjectScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [projectList, setProjectList] = useState<ProjectType[]>([]);
-  const [searchProjectList, setSearchProjectList] = useState<ProjectType[]>([]);
   const [isModalVisiable, setIsModalVisiable] = useState(false);
   const [searchText, setSearchText] = useState<string>('');
   const [selectedFilter, setSelectedFilter] = useState<string>('ALL');
@@ -61,10 +61,6 @@ const ProjectScreen = () => {
   const [lastDoc, setLastDoc] = useState<
     FirebaseFirestoreTypes.QueryDocumentSnapshot | undefined
   >(undefined);
-  const [searchedLastDoc, setSearchedLastDoc] = useState<
-    FirebaseFirestoreTypes.QueryDocumentSnapshot | undefined
-  >(undefined);
-  const [hasMoreResult, setHasMoreResult] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -90,30 +86,39 @@ const ProjectScreen = () => {
       q = q.startAfter(lastDoc);
     }
 
-    const querySnapshot: FirebaseFirestoreTypes.QuerySnapshot = await getDocs(
-      q,
-    );
+    await getDocs(q)
+      .then(querySnapshot => {
+        const projects: ProjectType[] = [];
+        querySnapshot.forEach((doc: any) => projects.push(doc.data()));
 
-    const projects: ProjectType[] = [];
-    if (querySnapshot) {
-      querySnapshot.forEach((doc: any) => projects.push(doc.data()));
-      setLastDoc(querySnapshot.docs.at(-1));
-      setHasMore(querySnapshot.docs.length === PROJECT_PAGE_SIZE);
-    }
-
-    setProjectList(prev => (init ? projects : [...prev, ...projects]));
-    setIsLoading(false);
-    setIsRefreshing(false);
+        setLastDoc(querySnapshot.docs.at(-1));
+        setHasMore(querySnapshot.docs.length === PROJECT_PAGE_SIZE);
+        setProjectList(prev => (init ? projects : [...prev, ...projects]));
+        setIsLoading(false);
+        setIsSearchLoading(false);
+        setIsRefreshing(false);
+      })
+      .catch(error => {
+        console.log({ error });
+        setLastDoc(undefined);
+        setHasMore(false);
+        setProjectList([]);
+        setIsLoading(false);
+        setIsSearchLoading(false);
+        setIsRefreshing(false);
+      });
   };
 
   useEffect(() => {
-    searchText.trim().length || selectedFilter !== 'ALL'
-      ? loadSearchData()
-      : loadData(true);
+    setIsSearchLoading(true);
+    if (searchText.trim().length || selectedFilter !== 'ALL') {
+      loadSearchData();
+    } else {
+      loadData(true);
+    }
   }, [searchText, selectedFilter]);
 
   const loadSearchData = (next = false) => {
-    setIsSearchLoading(true);
     let q = query(
       projectRef,
       where('is_archived', '==', !!params?.seeArchive),
@@ -123,48 +128,51 @@ const ProjectScreen = () => {
       orderBy('title'),
       limit(SEARCHED_PROJECT_PAGE_SIZE),
     );
+    if (IS_ADMIN) {
+      q = q.where(new FieldPath('created_by'), '==', user?.id);
+    } else {
+      q = q.where(new FieldPath('member_list'), 'array-contains', user?.id);
+    }
     if (selectedFilter != 'ALL') {
       q = q.where(new FieldPath('status'), '==', selectedFilter);
     }
-    if (next && searchedLastDoc) {
-      q = q.startAfter(searchedLastDoc);
+    if (next && lastDoc) {
+      q = q.startAfter(lastDoc);
     }
     console.log({ q });
 
     const result: ProjectType[] = [];
-    getDocs(q).then(querySnapshot => {
-      console.log({ querySnapshot });
-
-      if (querySnapshot) {
+    getDocs(q)
+      .then(querySnapshot => {
+        console.log({ querySnapshot });
         querySnapshot.forEach((doc: any) => result.push(doc.data()));
         console.log({ result });
-        setSearchProjectList(prev => (next ? [...prev, ...result] : result));
-        setSearchedLastDoc(querySnapshot.docs.at(-1));
-        setHasMoreResult(
-          querySnapshot.docs.length === SEARCHED_PROJECT_PAGE_SIZE,
-        );
-      }
-    });
-    setIsSearchLoading(false);
+        setLastDoc(querySnapshot.docs.at(-1));
+        setHasMore(querySnapshot.docs.length === SEARCHED_PROJECT_PAGE_SIZE);
+        setProjectList(prev => (next ? [...prev, ...result] : result));
+        setIsSearchLoading(false);
+      })
+      .catch(error => {
+        console.log({ error });
+        setLastDoc(undefined);
+        setHasMore(false);
+        setProjectList([]);
+        setIsSearchLoading(false);
+      });
   };
 
   const onRefresh = () => {
+    setIsRefreshing(true);
+
     setSearchText('');
     setSelectedFilter('ALL');
-    setSearchedLastDoc(undefined);
-    setHasMoreResult(false);
-    setSearchProjectList([]);
+    setLastDoc(undefined);
+    setHasMore(false);
+    setProjectList([]);
 
     setLastDoc(undefined);
-    setIsRefreshing(true);
     loadData(true);
   };
-
-  console.log('resultList: ', {
-    searchedLastDoc,
-    hasMoreResult,
-    searchProjectList,
-  });
 
   const AdminProjectCard = memo(({ project }: { project: ProjectType }) => {
     return (
@@ -259,11 +267,10 @@ const ProjectScreen = () => {
   const ListEmptyComponent = memo(() => (
     <View style={styles.emptyContainer}>
       {isSearchLoading ? (
-        <ActivityIndicator />
+       <BaseIndicator />
       ) : (
         <Text>
-          {(projectList?.length === 0 || searchProjectList?.length === 0) &&
-          searchText.trim().length
+          {projectList?.length === 0 && searchText.trim().length
             ? IS_ADMIN
               ? 'Searched project or client not found'
               : 'Searched project not found'
@@ -312,24 +319,28 @@ const ProjectScreen = () => {
       </View>
 
       {isSearchLoading ? (
-        <BaseLoader />
+        <View style={styles.loaderContainer}>
+          <BaseIndicator />
+        </View>
       ) : (
         <FlatList
           initialNumToRender={PROJECT_PAGE_SIZE}
           contentContainerStyle={styles.listContainer}
-          data={
-            searchText.trim().length || selectedFilter !== 'ALL'
-              ? searchProjectList
-              : projectList
-          }
+          data={projectList}
           renderItem={renderProject}
           ListEmptyComponent={ListEmptyComponent}
-          onEndReachedThreshold={0.5}
+          onEndReachedThreshold={0.2}
           onEndReached={() => {
-            hasMore ? loadData() : hasMoreResult && loadSearchData(true);
+            const isFiltering =
+              searchText.trim().length || selectedFilter !== 'ALL';
+            if (isFiltering && hasMore) {
+              loadSearchData(true);
+            } else if (hasMore) {
+              loadData();
+            }
           }}
           ListFooterComponent={() =>
-            (hasMore || hasMoreResult) && <ActivityIndicator />
+            hasMore && <BaseIndicator />
           }
           ListHeaderComponent={ListHeaderComponent}
           refreshing={isRefreshing}
@@ -376,14 +387,15 @@ const ProjectScreen = () => {
               </Text>
             </TouchableOpacity>
           ))}
-          {!params?.seeArchive && (
+          {IS_ADMIN && !params?.seeArchive && (
             <Text
               style={styles.linkText}
-              onPress={() =>
+              onPress={() => {
+                toggleModal();
                 navigation.push('Project', {
                   seeArchive: true,
-                })
-              }
+                });
+              }}
             >
               {'See Archive'}
             </Text>
@@ -549,4 +561,5 @@ const styles = StyleSheet.create({
     color: appColors.PRIMARY,
     textDecorationLine: 'underline',
   },
+  loaderContainer: { height: '85%', justifyContent: 'center' },
 });

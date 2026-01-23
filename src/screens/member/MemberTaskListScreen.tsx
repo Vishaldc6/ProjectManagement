@@ -6,9 +6,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import {
-  onSnapshot,
+  FieldPath,
+  FirebaseFirestoreTypes,
+  getDocs,
+  limit,
   or,
   orderBy,
   query,
@@ -19,16 +22,17 @@ import {
   widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
 
-import { TaskType } from '../../types/appTypes';
+import { ProjectType, TaskStatusEnum, TaskType } from '../../types/appTypes';
 import { taskRef } from '../../firebase/taskCollection';
 import { useAppSelector } from '../../hooks/reduxHooks';
 import appFonts from '../../styles/appFonts';
 import appColors from '../../styles/appColors';
 import { TASK_STATUS_LIST } from '../../constants';
-import { BaseLoader } from '../../components';
+import { BaseDropDown, BaseIndicator } from '../../components';
 import { toCapitalize } from '../../utils/helperFunctions';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useAppRoutes } from '../../hooks/useAppRoute';
+import { projectRef } from '../../firebase/projectCollection';
 
 const MemberTaskListScreen = () => {
   const { params } = useAppRoutes<'Task'>();
@@ -37,20 +41,61 @@ const MemberTaskListScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
   const IS_ADMIN = user?.role === 'Admin';
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [projects, setProjects] = useState<Partial<ProjectType>[]>([
+    { id: 'ALL', title: 'All' },
+  ]);
   const [taskList, setTaskList] = useState<TaskType[]>([]);
-  const [filteredTaskList, setFilteredTaskList] = useState<TaskType[]>([]);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedProject, setSelectedProject] = useState<string>(
+    projects[0].id ?? '',
+  );
+
+  const TASK_PAGE_LIMIT = 10;
+  const [hasMore, setHasMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<
+    FirebaseFirestoreTypes.DocumentData | undefined
+  >(undefined);
+  const [isRefreshLoading, setIsRefreshLoading] = useState(false);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
 
   useEffect(() => {
-    console.log({ params });
+    params?.projectId && setSelectedProject(params.projectId ?? '');
 
+    const project_query = query(
+      projectRef,
+      where('is_archived', '==', false),
+      where('is_deleted', '==', false),
+    );
+
+    const projectList: Partial<ProjectType>[] = [];
+    getDocs(project_query).then(querysnapshot => {
+      console.log({ querysnapshot });
+      querysnapshot.forEach((doc: any) =>
+        projectList.push({
+          ...doc.data(),
+          title: toCapitalize(doc.data().title),
+        }),
+      );
+      setProjects(prev => [...prev, ...projectList]);
+    });
+  }, [params]);
+
+  useEffect(() => {
+    setIsSearchLoading(true);
+    selectedStatus !== 'ALL' || selectedProject !== 'ALL'
+      ? loadFilterTasks()
+      : loadTasks();
+  }, [selectedProject, selectedStatus]);
+
+  const loadTasks = (next = false) => {
     let q = query(
       taskRef,
       where('is_archived', '==', params?.seeArchive ? true : false),
       where('is_deleted', '==', false),
       orderBy('created_at', 'desc'),
+      limit(TASK_PAGE_LIMIT),
     );
+
     if (!IS_ADMIN) {
       // const or_q = or(
       //   where('assigned_to', '==', user?.id),
@@ -66,47 +111,116 @@ const MemberTaskListScreen = () => {
         where('is_archived', '==', false),
         where('is_deleted', '==', false),
         orderBy('created_at', 'desc'),
+        limit(TASK_PAGE_LIMIT),
       );
     }
 
-    const taskListner = onSnapshot(q, querySnapshot => {
-      const tasks: TaskType[] = [];
-      querySnapshot &&
-        querySnapshot.forEach((doc: any) => {
-          tasks.push(doc.data());
-        });
-      setTaskList(tasks);
-      setFilteredTaskList(tasks);
-      setIsLoading(false);
-    });
+    if (selectedProject !== 'ALL') {
+      q = q.where(new FieldPath('project_id'), '==', selectedProject);
+    }
 
-    return () => {
-      taskListner();
-    };
-  }, []);
+    if (lastDoc && next) {
+      q = q.startAfter(lastDoc);
+    }
 
-  useEffect(() => {
-    setFilteredTaskList(
-      selectedStatus === 'ALL'
-        ? taskList
-        : taskList.filter(task => task.task_status === selectedStatus),
+    console.log({ q });
+
+    const tasks: TaskType[] = [];
+    getDocs(q)
+      .then((querysnapshot: FirebaseFirestoreTypes.QuerySnapshot) => {
+        querysnapshot.forEach((doc: any) => tasks.push(doc.data()));
+        setLastDoc(querysnapshot.docs.at(-1));
+        setHasMore(tasks.length < TASK_PAGE_LIMIT ? false : true);
+        setTaskList(prev => (next ? [...prev, ...tasks] : tasks));
+        setIsRefreshLoading(false);
+        setIsSearchLoading(false);
+      })
+      .catch(error => {
+        console.log({ error });
+        setLastDoc(undefined);
+        setHasMore(false);
+        setTaskList([]);
+        setIsRefreshLoading(false);
+        setIsSearchLoading(false);
+      });
+  };
+
+  const loadFilterTasks = (next = false) => {
+    let q = query(
+      taskRef,
+      where('is_archived', '==', params?.seeArchive ? true : false),
+      where('is_deleted', '==', false),
+      where('task_status', '==', selectedStatus),
+      orderBy('created_at', 'desc'),
+      limit(TASK_PAGE_LIMIT),
     );
-  }, [selectedStatus]);
+
+    if (!IS_ADMIN) {
+      // const or_q = or(
+      //   where('assigned_to', '==', user?.id),
+      //   where('created_by', '==', user?.id),
+      // );
+      // q = q.where(or_q)
+      q = query(
+        taskRef,
+        or(
+          where('assigned_to', '==', user?.id),
+          where('created_by', '==', user?.id),
+        ),
+        where('is_archived', '==', false),
+        where('is_deleted', '==', false),
+        where('task_status', '==', selectedStatus),
+        orderBy('created_at', 'desc'),
+        limit(TASK_PAGE_LIMIT),
+      );
+    }
+
+    if (selectedProject !== 'ALL') {
+      q = q.where(new FieldPath('project_id'), '==', selectedProject);
+    }
+
+    if (lastDoc && next) {
+      q = q.startAfter(lastDoc);
+    }
+
+    console.log({ q });
+
+    const tasks: TaskType[] = [];
+    getDocs(q)
+      .then((querysnapshot: FirebaseFirestoreTypes.QuerySnapshot) => {
+        querysnapshot.forEach((doc: any) => tasks.push(doc.data()));
+        setLastDoc(querysnapshot.docs.at(-1));
+        setHasMore(tasks.length < TASK_PAGE_LIMIT ? false : true);
+        setTaskList(prev => (next ? [...prev, ...tasks] : tasks));
+        setIsRefreshLoading(false);
+        setIsSearchLoading(false);
+      })
+      .catch(error => {
+        console.log({ error });
+        setIsRefreshLoading(false);
+        setIsSearchLoading(false);
+        setLastDoc(undefined);
+        setHasMore(false);
+        setTaskList([]);
+      });
+  };
 
   const renderItem = ({ item: task }: { item: TaskType }) => {
-    const taskIconTextColor =
-      task.task_status === 'DONE'
-        ? appColors.TASK_DONE
-        : task.task_status === 'IN-PROGRESS'
-        ? appColors.TASK_IN_PROGRESS
-        : appColors.TASK_TODO;
+    const taskColorStyle = {
+      color:
+        task.task_status === TaskStatusEnum.DONE
+          ? appColors.TASK_DONE
+          : task.task_status === TaskStatusEnum.IN_PROGRESS
+          ? appColors.TASK_IN_PROGRESS
+          : appColors.TASK_TODO,
+      backgroundColor:
+        task.task_status === TaskStatusEnum.DONE
+          ? appColors.TASK_DONE_BG
+          : task.task_status === TaskStatusEnum.IN_PROGRESS
+          ? appColors.TASK_IN_PROGRESS_BG
+          : appColors.TASK_TODO_BG,
+    };
 
-    const statusBgColor =
-      task.task_status === 'DONE'
-        ? appColors.TASK_DONE_BG
-        : task.task_status === 'IN-PROGRESS'
-        ? appColors.TASK_IN_PROGRESS_BG
-        : appColors.TASK_TODO_BG;
     return (
       <TouchableOpacity
         style={styles.taskCard}
@@ -119,24 +233,21 @@ const MemberTaskListScreen = () => {
       >
         <View style={styles.detailRow}>
           <Text style={styles.projectTitle}>{task.project_title}</Text>
-          <Text
-            style={[
-              styles.taskStatus,
-              { color: taskIconTextColor, backgroundColor: statusBgColor },
-            ]}
-          >
+          <Text style={[styles.taskStatus, taskColorStyle]}>
             {toCapitalize(task.task_status)}
           </Text>
         </View>
         <Text style={styles.taskTitle}>{task.title}</Text>
         {IS_ADMIN && (
-          <Text style={styles.taskMember}>{task.assigned_member}</Text>
+          <Text style={styles.taskMember}>
+            {toCapitalize(task.assigned_member)}
+          </Text>
         )}
       </TouchableOpacity>
     );
   };
 
-  const ListEmptyComponent = () => (
+  const ListEmptyComponent = memo(() => (
     <View style={styles.emptyContainer}>
       <Text>
         {selectedStatus !== 'ALL'
@@ -144,28 +255,37 @@ const MemberTaskListScreen = () => {
           : 'No tasks assigned to you yet!'}
       </Text>
     </View>
-  );
+  ));
+
+  const ListFooterComponent = memo(() => hasMore && <BaseIndicator />);
+
+  const onRefresh = () => {
+    setIsRefreshLoading(true);
+    setSelectedProject('ALL');
+    setSelectedStatus('ALL');
+    loadTasks();
+  };
+
+  const onEndReached = () => hasMore && loadTasks(true);
 
   return (
     <View style={styles.container}>
-      {isLoading && <BaseLoader />}
+      {IS_ADMIN && !params?.seeArchive && (
+        <Text
+          style={styles.archiveText}
+          onPress={() => navigation.push('Task', { seeArchive: true })}
+        >
+          {'See Archive Tasks'}
+        </Text>
+      )}
+      <BaseDropDown
+        data={projects}
+        labelField={'title'}
+        value={selectedProject}
+        onChange={val => setSelectedProject(val.id)}
+        valueField={'id'}
+      />
       <View>
-        {!params?.seeArchive && (
-          <Text
-            style={{
-              marginHorizontal: wp(3),
-              alignSelf: 'flex-end',
-              color: appColors.PRIMARY,
-            }}
-            onPress={() => {
-              navigation.push('Task', {
-                seeArchive: true,
-              });
-            }}
-          >
-            {'See Archive Tasks'}
-          </Text>
-        )}
         <ScrollView
           style={{ alignSelf: 'flex-start' }}
           contentContainerStyle={styles.filterContainer}
@@ -193,16 +313,26 @@ const MemberTaskListScreen = () => {
             );
           })}
         </ScrollView>
+      </View>
+      {isSearchLoading ? (
+        <View style={styles.loaderContainer}>
+          <BaseIndicator />
+        </View>
+      ) : (
         <FlatList
-          data={filteredTaskList}
+          initialNumToRender={TASK_PAGE_LIMIT}
+          data={taskList}
           renderItem={renderItem}
           ListEmptyComponent={ListEmptyComponent}
-          contentContainerStyle={{
-            paddingHorizontal: wp(3),
-            paddingBottom: hp(10),
-          }}
+          contentContainerStyle={styles.taskList}
+          ListFooterComponent={ListFooterComponent}
+          refreshing={isRefreshLoading}
+          onRefresh={onRefresh}
+          onEndReachedThreshold={0.2}
+          onEndReached={onEndReached}
+          showsVerticalScrollIndicator={false}
         />
-      </View>
+      )}
     </View>
   );
 };
@@ -212,6 +342,13 @@ export default MemberTaskListScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    paddingHorizontal: wp(3),
+    paddingVertical: hp(1),
+    gap: hp(1),
+  },
+  taskList: {
+    flexGrow: 1,
+    paddingBottom: hp(5),
   },
   taskCard: {
     backgroundColor: appColors.SECONDARY_BACKGROUND,
@@ -243,10 +380,10 @@ const styles = StyleSheet.create({
   },
   filterContainer: {
     gap: wp(2),
-    paddingHorizontal: wp(3),
-    marginVertical: hp(1),
   },
   filterStatusContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     paddingVertical: wp(1),
     paddingHorizontal: wp(4),
@@ -266,4 +403,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  archiveText: {
+    marginHorizontal: wp(3),
+    alignSelf: 'flex-end',
+    color: appColors.PRIMARY,
+  },
+  loaderContainer: { height: '80%', justifyContent: 'center' },
 });
