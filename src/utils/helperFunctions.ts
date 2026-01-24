@@ -59,7 +59,7 @@ export async function requestUserPermission() {
   }
 
   const hasPermission = await messagingApp.hasPermission();
-  const permissionList = [
+  const permissionList: number[] = [
     AuthorizationStatus.AUTHORIZED,
     AuthorizationStatus.PROVISIONAL,
   ];
@@ -82,19 +82,39 @@ export async function requestUserPermission() {
 
     console.log('Authorization status:', { authStatus, enabled });
   }
+  // --- CHECK : DENIED HANDLER
 
   console.log('Authorization status:', { hasPermission });
 }
 
+export enum NotificationTypeEnum {
+  ADD_NEW_PROJECT = 'ADD_NEW_PROJECT',
+  REMOVE_PROJECT = 'REMOVE_PROJECT',
+  STATUS_CHANGE = 'STATUS_CHANGE',
+  PM_REVOKE = 'PM_REVOKE',
+  PM_ASSIGN = 'PM_ASSIGN',
+  NEW_TASK_ASSIGN = 'NEW_TASK_ASSIGN',
+  NEW_COMMENT = 'NEW_COMMENT',
+
+  // -- CHECK: assignee changed in task
+}
+
 export type NotificationDataType = {
+  type: NotificationTypeEnum;
+  project_id?: string;
+  project_title?: string;
+  task_id?: string;
+};
+
+export type BodyDataType = {
   user_id: string;
   title: string;
   body: string;
-  data: any;
+  data: NotificationDataType;
 };
 
 // send notification
-export const sendNotification = async (bodyData: NotificationDataType) => {
+export const sendNotification = async (bodyData: BodyDataType) => {
   fetch('http://192.168.200.72:3000/send-notification', {
     body: JSON.stringify(bodyData),
     method: 'POST',

@@ -11,16 +11,25 @@ import {
   where,
 } from '@react-native-firebase/firestore';
 
-import { ProjectType, RolesType, UserType } from '../types/appTypes';
+import {
+  ProjectStatusType,
+  ProjectType,
+  RolesType,
+  UserType,
+} from '../types/appTypes';
 import { db } from '.';
-import { sendNotification } from '../utils/helperFunctions';
+import {
+  BodyDataType,
+  NotificationTypeEnum,
+  sendNotification,
+} from '../utils/helperFunctions';
 import { store } from '../redux/store';
 import { userRef } from './userCollection';
 
 export const projectRef = collection(db, 'projects');
 
 // add new project
-export const addProject = async (docId: string, data: ProjectType) => {
+export const addProject = async (docId: string, data: Partial<ProjectType>) => {
   const result = await setDoc(projectRef.doc(docId), {
     ...data,
     is_archived: false,
@@ -40,28 +49,158 @@ export const updateProject = async (
   await updateDoc(doc(projectRef, docId), projectData);
 };
 
+interface NotifyMemberParamType {
+  type: 'add' | 'update';
+  project: Partial<ProjectType>;
+  newMemberIds?: string[];
+  removedMemberIds?: string[];
+  newPmId?: string;
+  oldPmId?: string;
+  isStatusChanged?: boolean;
+}
 // notify member about project
 export const notifyMemberForProject = async ({
-  memberIds,
+  type,
+  newMemberIds,
+  removedMemberIds,
+  newPmId,
+  oldPmId,
   project,
-}: {
-  memberIds: string[];
-  project: ProjectType;
-}) => {
-  memberIds.forEach(async mid => {
-    // NOTIFY THOSE ADDED MEMBERS
-    if (mid !== store.getState().AuthReducer.user?.id) {
-      sendNotification({
-        body: `You are added in new Project: ${project.title}`,
-        data: {
-          project_id: project.id,
-          project_title: project.title,
-        },
-        title: 'New Project added',
-        user_id: mid,
+  isStatusChanged,
+}: NotifyMemberParamType) => {
+  console.log({
+    type,
+    newMemberIds,
+    removedMemberIds,
+    newPmId,
+    oldPmId,
+    project,
+    isStatusChanged,
+  });
+
+  const defaultNotificationData: BodyDataType = {
+    body: '',
+    data: {
+      project_id: project.id,
+      project_title: project.title,
+      type: NotificationTypeEnum.ADD_NEW_PROJECT,
+    },
+    title: '',
+    user_id: '',
+  };
+  const notificationList: BodyDataType[] = [];
+
+  if (type === 'add') {
+    defaultNotificationData.title = 'New Project added';
+    defaultNotificationData.data.type = NotificationTypeEnum.ADD_NEW_PROJECT;
+
+    const projectManagerId = project?.project_manager?.at(0);
+    // all member (no admin)
+    const onlyMemberList = project.member_list?.filter(
+      id =>
+        id !== store.getState().AuthReducer.user?.id && id !== projectManagerId,
+    );
+    // pm : you added in project as pm
+    if (projectManagerId) {
+      defaultNotificationData.body = `You are added in new Project as Project Manager: ${project.title}`;
+      defaultNotificationData.user_id = projectManagerId;
+
+      notificationList.push({ ...defaultNotificationData });
+    }
+
+    // other : you added in new project
+    onlyMemberList?.forEach(mId => {
+      defaultNotificationData.body = `You are added in new Project: ${project.title}`;
+      defaultNotificationData.user_id = mId;
+
+      notificationList.push({ ...defaultNotificationData });
+    });
+  } else {
+    // new member added
+    newMemberIds?.forEach(mId => {
+      defaultNotificationData.title = 'New Project added';
+      defaultNotificationData.data.type = NotificationTypeEnum.ADD_NEW_PROJECT;
+      defaultNotificationData.body = `You are added in new Project: ${project.title}`;
+      defaultNotificationData.user_id = mId;
+
+      // new pm & new member : you are added in project as pm
+      if (newPmId && mId === newPmId) {
+        defaultNotificationData.body = `You are added in new Project as Project Manager: ${project.title}`;
+      }
+
+      notificationList.push({ ...defaultNotificationData });
+    });
+
+    // old removed
+    removedMemberIds?.forEach(mId => {
+      defaultNotificationData.data.type = NotificationTypeEnum.REMOVE_PROJECT;
+      defaultNotificationData.title = 'Project removed';
+      defaultNotificationData.user_id = mId;
+      defaultNotificationData.body = `You are removed from a Project: ${project.title}`;
+
+      notificationList.push({ ...defaultNotificationData });
+    });
+
+    // new pm & old member : you are now pm of project:
+    if (
+      newPmId &&
+      newPmId !== project.created_by &&
+      !newMemberIds?.includes(newPmId)
+    ) {
+      defaultNotificationData.data.type = NotificationTypeEnum.PM_ASSIGN;
+      defaultNotificationData.title = 'New Project manager role';
+      defaultNotificationData.user_id = newPmId;
+      defaultNotificationData.body = `You are now Project Manager of project: ${project.title}`;
+
+      notificationList.push({ ...defaultNotificationData });
+    }
+
+    // old pm & existing member: no longer pm in project
+    if (
+      oldPmId &&
+      oldPmId !== project.created_by &&
+      project.member_list?.includes(oldPmId)
+    ) {
+      defaultNotificationData.data.type = NotificationTypeEnum.PM_REVOKE;
+      defaultNotificationData.title = 'Project manager role revoked';
+      defaultNotificationData.user_id = oldPmId;
+      defaultNotificationData.body = `You are no longer project manager in Project: ${project.title}`;
+
+      notificationList.push({ ...defaultNotificationData });
+    }
+
+    // status update : project completed / in active / active again
+    // only to old members, no new member needed to notify
+    // oldMemberList = existing - new
+    const existingMemberList = project.member_list?.filter(
+      id =>
+        !newMemberIds?.includes(id) &&
+        id !== store.getState().AuthReducer.user?.id,
+    );
+
+    if (isStatusChanged) {
+      let msg =
+        project.status === ProjectStatusType.ACTIVE
+          ? 'activated again'
+          : project.status === ProjectStatusType.IN_ACTIVE
+          ? 'is no longer active'
+          : 'completed sucessfully';
+
+      existingMemberList?.forEach(mId => {
+        defaultNotificationData.data.type = NotificationTypeEnum.STATUS_CHANGE;
+        defaultNotificationData.title = 'Project status updated';
+        defaultNotificationData.user_id = mId;
+        defaultNotificationData.body = `${project.title} ${msg}`;
+
+        notificationList.push({ ...defaultNotificationData });
       });
     }
-  });
+  }
+
+  notificationList.length &&
+    notificationList.forEach(notification => {
+      sendNotification({ ...notification });
+    });
 
   return;
 };
