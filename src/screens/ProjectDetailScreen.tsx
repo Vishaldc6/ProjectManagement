@@ -7,20 +7,26 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
 } from 'react-native-responsive-screen';
 import {
+  FieldPath,
   limit,
   onSnapshot,
   orderBy,
   query,
   where,
 } from '@react-native-firebase/firestore';
+import { useFocusEffect } from '@react-navigation/native';
 
-import { taskRef } from '../firebase/taskCollection';
+import {
+  fetchlAllTaskIds,
+  taskRef,
+  updateTask,
+} from '../firebase/taskCollection';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
 import { useAppNavigation } from '../hooks/useAppNavigation';
@@ -34,6 +40,7 @@ import {
 import {
   fetchProjectMembers,
   fetchSingleProject,
+  notifyMemberForProject,
   updateProject,
 } from '../firebase/projectCollection';
 import { BaseIcon, BaseLoader, BaseModal } from '../components';
@@ -60,38 +67,38 @@ const ProjectDetailScreen = () => {
     [project],
   );
 
-  useEffect(() => {
-    if (params?.id) {
-      setIsLoading(true);
-      fetchSingleProject(params?.id).then(res => {
-        setProject(res);
-        setIsLoading(false);
-        fetchProjectMembers(res).then(members => {
-          setIsMemberListLoading(false);
-          setMemberList(members);
+  useFocusEffect(
+    useCallback(() => {
+      if (params?.id) {
+        setIsLoading(true);
+        fetchSingleProject(params?.id).then(res => {
+          setProject(res);
+          setIsLoading(false);
+          fetchProjectMembers(res).then(members => {
+            setIsMemberListLoading(false);
+            setMemberList(members);
+          });
         });
-      });
-    }
-  }, []);
+      }
+    }, []),
+  );
 
   useEffect(() => {
-    let q;
+    let q = query(
+      taskRef,
+      where('project_id', '==', params?.id),
+      where('is_deleted', '==', false),
+      orderBy('created_at', 'desc'),
+      limit(4),
+    );
     if (IS_ADMIN || IS_PM) {
-      q = query(
-        taskRef,
-        where('project_id', '==', params?.id),
-        orderBy('updated_at', 'desc'),
-        limit(4),
-      );
+      q = q.where(new FieldPath('is_archived'), '==', !!project?.is_archived);
     } else {
-      q = query(
-        taskRef,
-        where('assigned_to', '==', user?.id),
-        where('project_id', '==', params?.id),
-        orderBy('updated_at', 'desc'),
-        limit(4),
-      );
+      q = q
+        .where(new FieldPath('assigned_to'), '==', user?.id)
+        .where(new FieldPath('is_archived'), '==', false);
     }
+    console.log({ q });
 
     const unsubscribe = onSnapshot(q, querySnapshot => {
       const tasks: TaskType[] = [];
@@ -104,7 +111,7 @@ const ProjectDetailScreen = () => {
     return () => {
       unsubscribe();
     };
-  }, [IS_PM]);
+  }, [IS_PM, project]);
 
   enum OperationTypes {
     ARCHIVE = 'ARCHIVE',
@@ -137,11 +144,28 @@ const ProjectDetailScreen = () => {
 
   const handleOperation = (operation: OperationTypes) => {
     setIsLoading(true);
-    const data: Partial<TaskType> =
+    const data: Partial<ProjectType> =
       operation === OperationTypes.DELETE
         ? { is_deleted: true }
         : { is_archived: operation === OperationTypes.ARCHIVE ? true : false };
+
     updateProject(project?.id ?? '', data).then(() => {
+      // update tasks as per project operation
+      fetchlAllTaskIds(project?.id ?? '').then(ids => {
+        ids.forEach(taskId => {
+          updateTask(taskId, data as Partial<TaskType>);
+        });
+      });
+
+      notifyMemberForProject({
+        project: project ?? {},
+        type:
+          operation === OperationTypes.DELETE
+            ? 'delete'
+            : operation === OperationTypes.ARCHIVE
+            ? 'archive'
+            : 'restore',
+      });
       setIsLoading(false);
       navigation.goBack();
     });
@@ -325,28 +349,45 @@ const ProjectDetailScreen = () => {
                   {project?.status}
                 </Text>
               </View>
-              {IS_ADMIN && (
-                <View style={{ flexDirection: 'row' }}>
+              <View style={{ flexDirection: 'row' }}>
+                {IS_ADMIN && (
+                  <>
+                    <Text
+                      style={[
+                        styles.linkText,
+                        { color: appColors.DANGER_TEXT },
+                      ]}
+                      onPress={() => handleConfirm(OperationTypes.DELETE)}
+                    >
+                      {'Delete'}
+                    </Text>
+                    <Text
+                      style={styles.linkText}
+                      onPress={() =>
+                        handleConfirm(
+                          project?.is_archived
+                            ? OperationTypes.RESTORE
+                            : OperationTypes.ARCHIVE,
+                        )
+                      }
+                    >
+                      {project?.is_archived ? 'Restore' : 'Archive'}
+                    </Text>
+                  </>
+                )}
+                {(IS_ADMIN || IS_PM) && (
                   <Text
-                    style={[styles.linkText, { color: appColors.DANGER_TEXT }]}
-                    onPress={() => handleConfirm(OperationTypes.DELETE)}
+                    style={[styles.linkText]}
+                    onPress={() => {
+                      navigation.navigate('ProjectForm', {
+                        id: project.id,
+                      });
+                    }}
                   >
-                    {'Delete'}
+                    {'Edit'}
                   </Text>
-                  <Text
-                    style={styles.linkText}
-                    onPress={() =>
-                      handleConfirm(
-                        project?.is_archived
-                          ? OperationTypes.RESTORE
-                          : OperationTypes.ARCHIVE,
-                      )
-                    }
-                  >
-                    {project?.is_archived ? 'Restore' : 'Archive'}
-                  </Text>
-                </View>
-              )}
+                )}
+              </View>
             </View>
             <View style={styles.projectHeaderContainer}>
               <View style={{ flex: 1 }}>

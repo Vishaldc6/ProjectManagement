@@ -8,10 +8,12 @@ import logger from 'redux-logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import AuthSlice from './slices/AuthSlice';
+import ProjectSlice from './slices/ProjectSlice';
 import { messagingApp } from '../firebase';
 
 const reducers = combineReducers({
   AuthReducer: AuthSlice,
+  ProjectReducer: ProjectSlice,
 });
 
 export const USER_LOGOUT = 'USER_LOGOUT';
@@ -31,7 +33,7 @@ const getRootReducers = (
 };
 
 const persistReducers = persistReducer(
-  { key: 'root', storage: AsyncStorage },
+  { key: 'root', storage: AsyncStorage, blacklist: ['ProjectReducer'] },
   getRootReducers,
 );
 

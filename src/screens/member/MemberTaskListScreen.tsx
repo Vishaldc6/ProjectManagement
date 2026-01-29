@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 import {
   FieldPath,
   FirebaseFirestoreTypes,
@@ -21,10 +21,11 @@ import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { ProjectType, TaskStatusEnum, TaskType } from '../../types/appTypes';
 import { taskRef } from '../../firebase/taskCollection';
-import { useAppSelector } from '../../hooks/reduxHooks';
+import { useAppDispatch, useAppSelector } from '../../hooks/reduxHooks';
 import appFonts from '../../styles/appFonts';
 import appColors from '../../styles/appColors';
 import { TASK_STATUS_LIST } from '../../constants';
@@ -32,23 +33,29 @@ import { BaseDropDown, BaseIndicator } from '../../components';
 import { toCapitalize } from '../../utils/helperFunctions';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import { useAppRoutes } from '../../hooks/useAppRoute';
-import { projectRef } from '../../firebase/projectCollection';
+import {
+  fetchProjects,
+  resetProjectList,
+} from '../../redux/slices/ProjectSlice';
 
 const MemberTaskListScreen = () => {
   const { params } = useAppRoutes<'Task'>();
   const navigation = useAppNavigation('Task');
 
+  const dispatch = useAppDispatch();
+
   const { user } = useAppSelector(state => state.AuthReducer);
+  const { hasMore: hasMoreProjects, lastDoc: lastProjectDoc } = useAppSelector(
+    state => state.ProjectReducer,
+  );
   const IS_ADMIN = user?.role === 'Admin';
 
-  const [projects, setProjects] = useState<Partial<ProjectType>[]>([
-    { id: 'ALL', title: 'All' },
-  ]);
+  const [projects, setProjects] = useState<Partial<ProjectType>[]>([]);
   const [taskList, setTaskList] = useState<TaskType[]>([]);
   const [selectedStatus, setSelectedStatus] = useState('ALL');
-  const [selectedProject, setSelectedProject] = useState<string>(
-    projects[0].id ?? '',
-  );
+  const [selectedProject, setSelectedProject] = useState<
+    string | undefined | Partial<ProjectType>
+  >(undefined);
 
   const TASK_PAGE_LIMIT = 10;
   const [hasMore, setHasMore] = useState(false);
@@ -58,65 +65,68 @@ const MemberTaskListScreen = () => {
   const [isRefreshLoading, setIsRefreshLoading] = useState(false);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      setIsSearchLoading(true);
+      loadTasks();
+    }, [selectedProject, selectedStatus]),
+  );
+
   useEffect(() => {
     params?.projectId && setSelectedProject(params.projectId ?? '');
-
-    const project_query = query(
-      projectRef,
-      where('is_archived', '==', false),
-      where('is_deleted', '==', false),
-    );
-
-    const projectList: Partial<ProjectType>[] = [];
-    getDocs(project_query).then(querysnapshot => {
-      console.log({ querysnapshot });
-      querysnapshot.forEach((doc: any) =>
-        projectList.push({
-          ...doc.data(),
-          title: toCapitalize(doc.data().title),
-        }),
-      );
-      setProjects(prev => [...prev, ...projectList]);
-    });
+    dispatch(resetProjectList());
+    loadProjects(true);
   }, [params]);
 
-  useEffect(() => {
-    setIsSearchLoading(true);
-    selectedStatus !== 'ALL' || selectedProject !== 'ALL'
-      ? loadFilterTasks()
-      : loadTasks();
-  }, [selectedProject, selectedStatus]);
+  const loadProjects = (init = false) => {
+    dispatch(
+      fetchProjects({
+        init,
+        isAdmin: IS_ADMIN,
+        lastDoc: lastProjectDoc,
+        userId: user?.id,
+      }),
+    )
+      .unwrap()
+      .then(res => {
+        console.log({ res });
+        setProjects(prev => [
+          ...(init
+            ? [
+                {
+                  title: 'All',
+                  id: undefined,
+                },
+              ]
+            : prev),
+          ...res.projectList.map(p => ({ ...p, title: toCapitalize(p.title) })),
+        ]);
+      });
+  };
 
   const loadTasks = (next = false) => {
     let q = query(
       taskRef,
-      where('is_archived', '==', params?.seeArchive ? true : false),
+      where('is_archived', '==', false),
       where('is_deleted', '==', false),
       orderBy('created_at', 'desc'),
       limit(TASK_PAGE_LIMIT),
     );
 
     if (!IS_ADMIN) {
-      // const or_q = or(
-      //   where('assigned_to', '==', user?.id),
-      //   where('created_by', '==', user?.id),
-      // );
-      // q = q.where(or_q)
-      q = query(
-        taskRef,
-        or(
-          where('assigned_to', '==', user?.id),
-          where('created_by', '==', user?.id),
-        ),
-        where('is_archived', '==', false),
-        where('is_deleted', '==', false),
-        orderBy('created_at', 'desc'),
-        limit(TASK_PAGE_LIMIT),
+      const or_q = or(
+        where('assigned_to', '==', user?.id),
+        where('created_by', '==', user?.id),
       );
+      q = query(q, or_q);
     }
 
-    if (selectedProject !== 'ALL') {
+    if (selectedProject) {
       q = q.where(new FieldPath('project_id'), '==', selectedProject);
+    }
+
+    if (selectedStatus !== 'ALL') {
+      q = q.where(new FieldPath('task_status'), '==', selectedStatus);
     }
 
     if (lastDoc && next) {
@@ -130,7 +140,7 @@ const MemberTaskListScreen = () => {
       .then((querysnapshot: FirebaseFirestoreTypes.QuerySnapshot) => {
         querysnapshot.forEach((doc: any) => tasks.push(doc.data()));
         setLastDoc(querysnapshot.docs.at(-1));
-        setHasMore(tasks.length < TASK_PAGE_LIMIT ? false : true);
+        setHasMore(tasks.length >= TASK_PAGE_LIMIT);
         setTaskList(prev => (next ? [...prev, ...tasks] : tasks));
         setIsRefreshLoading(false);
         setIsSearchLoading(false);
@@ -142,66 +152,6 @@ const MemberTaskListScreen = () => {
         setTaskList([]);
         setIsRefreshLoading(false);
         setIsSearchLoading(false);
-      });
-  };
-
-  const loadFilterTasks = (next = false) => {
-    let q = query(
-      taskRef,
-      where('is_archived', '==', params?.seeArchive ? true : false),
-      where('is_deleted', '==', false),
-      where('task_status', '==', selectedStatus),
-      orderBy('created_at', 'desc'),
-      limit(TASK_PAGE_LIMIT),
-    );
-
-    if (!IS_ADMIN) {
-      // const or_q = or(
-      //   where('assigned_to', '==', user?.id),
-      //   where('created_by', '==', user?.id),
-      // );
-      // q = q.where(or_q)
-      q = query(
-        taskRef,
-        or(
-          where('assigned_to', '==', user?.id),
-          where('created_by', '==', user?.id),
-        ),
-        where('is_archived', '==', false),
-        where('is_deleted', '==', false),
-        where('task_status', '==', selectedStatus),
-        orderBy('created_at', 'desc'),
-        limit(TASK_PAGE_LIMIT),
-      );
-    }
-
-    if (selectedProject !== 'ALL') {
-      q = q.where(new FieldPath('project_id'), '==', selectedProject);
-    }
-
-    if (lastDoc && next) {
-      q = q.startAfter(lastDoc);
-    }
-
-    console.log({ q });
-
-    const tasks: TaskType[] = [];
-    getDocs(q)
-      .then((querysnapshot: FirebaseFirestoreTypes.QuerySnapshot) => {
-        querysnapshot.forEach((doc: any) => tasks.push(doc.data()));
-        setLastDoc(querysnapshot.docs.at(-1));
-        setHasMore(tasks.length < TASK_PAGE_LIMIT ? false : true);
-        setTaskList(prev => (next ? [...prev, ...tasks] : tasks));
-        setIsRefreshLoading(false);
-        setIsSearchLoading(false);
-      })
-      .catch(error => {
-        console.log({ error });
-        setIsRefreshLoading(false);
-        setIsSearchLoading(false);
-        setLastDoc(undefined);
-        setHasMore(false);
-        setTaskList([]);
       });
   };
 
@@ -261,29 +211,31 @@ const MemberTaskListScreen = () => {
 
   const onRefresh = () => {
     setIsRefreshLoading(true);
-    setSelectedProject('ALL');
+    setSelectedProject(undefined);
     setSelectedStatus('ALL');
     loadTasks();
+    loadProjects(true);
   };
 
   const onEndReached = () => hasMore && loadTasks(true);
 
   return (
     <View style={styles.container}>
-      {IS_ADMIN && !params?.seeArchive && (
-        <Text
-          style={styles.archiveText}
-          onPress={() => navigation.push('Task', { seeArchive: true })}
-        >
-          {'See Archive Tasks'}
-        </Text>
-      )}
       <BaseDropDown
         data={projects}
         labelField={'title'}
         value={selectedProject}
         onChange={val => setSelectedProject(val.id)}
         valueField={'id'}
+        maxHeight={hp(15)}
+        autoScroll={false}
+        flatListProps={{
+          ListFooterComponent: hasMoreProjects ? <BaseIndicator /> : null,
+          onEndReachedThreshold: 0.2,
+          onEndReached: () => {
+            hasMoreProjects && loadProjects();
+          },
+        }}
       />
       <View>
         <ScrollView
@@ -402,11 +354,6 @@ const styles = StyleSheet.create({
     height: hp(70),
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  archiveText: {
-    marginHorizontal: wp(3),
-    alignSelf: 'flex-end',
-    color: appColors.PRIMARY,
   },
   loaderContainer: { height: '80%', justifyContent: 'center' },
 });

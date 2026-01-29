@@ -1,7 +1,5 @@
 import {
-  ActivityIndicator,
   FlatList,
-  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -12,19 +10,9 @@ import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
 } from 'react-native-responsive-screen';
-import {
-  FieldPath,
-  FirebaseFirestoreTypes,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
-} from '@react-native-firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useAppNavigation } from '../hooks/useAppNavigation';
-import { projectRef } from '../firebase/projectCollection';
 import { ProjectStatusType, ProjectType } from '../types/appTypes';
 import appColors from '../styles/appColors';
 import appFonts from '../styles/appFonts';
@@ -37,72 +25,65 @@ import {
   BaseModal,
 } from '../components';
 import { PROJECT_STATUS_LIST } from '../constants';
-import { toCapitalize } from '../utils/helperFunctions';
-import { useAppSelector } from '../hooks/reduxHooks';
+import { debounce, toCapitalize } from '../utils/helperFunctions';
+import { useAppDispatch, useAppSelector } from '../hooks/reduxHooks';
 import { useAppRoutes } from '../hooks/useAppRoute';
+import {
+  fetchProjects,
+  PROJECT_PAGE_SIZE,
+  resetProjectList,
+} from '../redux/slices/ProjectSlice';
 
 const ProjectScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
   const { params } = useAppRoutes<'Project'>();
   const navigation = useAppNavigation('Project');
 
+  const dispatch = useAppDispatch();
+  const { projectList, lastDoc, hasMore } = useAppSelector(
+    state => state.ProjectReducer,
+  );
+
   const IS_ADMIN = user?.role === 'Admin';
-  const [isLoading, setIsLoading] = useState(true);
+
+  const [isLoading, setIsLoading] = useState(false);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
-  const [projectList, setProjectList] = useState<ProjectType[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalVisiable, setIsModalVisiable] = useState(false);
+
   const [searchText, setSearchText] = useState<string>('');
   const [selectedFilter, setSelectedFilter] = useState<string>('ALL');
 
-  const PROJECT_PAGE_SIZE = 10;
-  const SEARCHED_PROJECT_PAGE_SIZE = 10;
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [lastDoc, setLastDoc] = useState<
-    FirebaseFirestoreTypes.QueryDocumentSnapshot | undefined
-  >(undefined);
-
   useFocusEffect(
     useCallback(() => {
+      setIsLoading(true);
+      setSearchText('');
+      setSelectedFilter('ALL');
+      dispatch(resetProjectList());
       loadData(true);
     }, []),
   );
 
   const loadData = async (init = false) => {
-    let q = query(
-      projectRef,
-      where('is_archived', '==', !!params?.seeArchive),
-      where('is_deleted', '==', false),
-      orderBy('updated_at', 'desc'),
-      limit(PROJECT_PAGE_SIZE),
-    );
-    if (IS_ADMIN) {
-      q = q.where(new FieldPath('created_by'), '==', user?.id);
-    } else {
-      q = q.where(new FieldPath('member_list'), 'array-contains', user?.id);
-    }
-
-    if (lastDoc && !init) {
-      q = q.startAfter(lastDoc);
-    }
-
-    await getDocs(q)
-      .then(querySnapshot => {
-        const projects: ProjectType[] = [];
-        querySnapshot.forEach((doc: any) => projects.push(doc.data()));
-
-        setLastDoc(querySnapshot.docs.at(-1));
-        setHasMore(querySnapshot.docs.length === PROJECT_PAGE_SIZE);
-        setProjectList(prev => (init ? projects : [...prev, ...projects]));
+    dispatch(
+      fetchProjects({
+        init,
+        isAdmin: IS_ADMIN,
+        lastDoc: lastDoc,
+        seeArchive: params?.seeArchive,
+        userId: user?.id,
+        searchStatus: selectedFilter,
+        searchTitle: searchText,
+      }),
+    )
+      .unwrap()
+      .then(res => {
         setIsLoading(false);
         setIsSearchLoading(false);
         setIsRefreshing(false);
       })
       .catch(error => {
         console.log({ error });
-        setLastDoc(undefined);
-        setHasMore(false);
-        setProjectList([]);
         setIsLoading(false);
         setIsSearchLoading(false);
         setIsRefreshing(false);
@@ -111,66 +92,16 @@ const ProjectScreen = () => {
 
   useEffect(() => {
     setIsSearchLoading(true);
-    if (searchText.trim().length || selectedFilter !== 'ALL') {
-      loadSearchData();
-    } else {
-      loadData(true);
-    }
+    loadData(true);
   }, [searchText, selectedFilter]);
 
-  const loadSearchData = (next = false) => {
-    let q = query(
-      projectRef,
-      where('is_archived', '==', !!params?.seeArchive),
-      where('is_deleted', '==', false),
-      where('title', '>=', searchText.trim().toLowerCase()),
-      where('title', '<=', searchText.trim().toLowerCase() + '\uf8ff'),
-      orderBy('title'),
-      limit(SEARCHED_PROJECT_PAGE_SIZE),
-    );
-    if (IS_ADMIN) {
-      q = q.where(new FieldPath('created_by'), '==', user?.id);
-    } else {
-      q = q.where(new FieldPath('member_list'), 'array-contains', user?.id);
-    }
-    if (selectedFilter != 'ALL') {
-      q = q.where(new FieldPath('status'), '==', selectedFilter);
-    }
-    if (next && lastDoc) {
-      q = q.startAfter(lastDoc);
-    }
-    console.log({ q });
-
-    const result: ProjectType[] = [];
-    getDocs(q)
-      .then(querySnapshot => {
-        console.log({ querySnapshot });
-        querySnapshot.forEach((doc: any) => result.push(doc.data()));
-        console.log({ result });
-        setLastDoc(querySnapshot.docs.at(-1));
-        setHasMore(querySnapshot.docs.length === SEARCHED_PROJECT_PAGE_SIZE);
-        setProjectList(prev => (next ? [...prev, ...result] : result));
-        setIsSearchLoading(false);
-      })
-      .catch(error => {
-        console.log({ error });
-        setLastDoc(undefined);
-        setHasMore(false);
-        setProjectList([]);
-        setIsSearchLoading(false);
-      });
-  };
+  // -- NEED TO CHECK: issue
+  // const debouncedFunc = useCallback(debounce(loadSearchData, 2000), []);
 
   const onRefresh = () => {
     setIsRefreshing(true);
-
     setSearchText('');
     setSelectedFilter('ALL');
-    setLastDoc(undefined);
-    setHasMore(false);
-    setProjectList([]);
-
-    setLastDoc(undefined);
     loadData(true);
   };
 
@@ -266,17 +197,13 @@ const ProjectScreen = () => {
 
   const ListEmptyComponent = memo(() => (
     <View style={styles.emptyContainer}>
-      {isSearchLoading ? (
-       <BaseIndicator />
-      ) : (
-        <Text>
-          {projectList?.length === 0 && searchText.trim().length
-            ? IS_ADMIN
-              ? 'Searched project or client not found'
-              : 'Searched project not found'
-            : 'Projects not found!'}
-        </Text>
-      )}
+      <Text>
+        {projectList?.length === 0 && searchText.trim().length
+          ? IS_ADMIN
+            ? 'Searched project or client not found'
+            : 'Searched project not found'
+          : 'Projects not found!'}
+      </Text>
     </View>
   ));
 
@@ -301,7 +228,10 @@ const ProjectScreen = () => {
       <View style={styles.searchHeader}>
         <BaseInput
           value={searchText}
-          onChangeText={text => setSearchText(text)}
+          onChangeText={text => {
+            // debouncedFunc(text);
+            setSearchText(text);
+          }}
           placeholder={
             IS_ADMIN
               ? 'Search Project name or client name'
@@ -318,7 +248,7 @@ const ProjectScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {isSearchLoading ? (
+      {!isLoading && isSearchLoading ? (
         <View style={styles.loaderContainer}>
           <BaseIndicator />
         </View>
@@ -330,18 +260,8 @@ const ProjectScreen = () => {
           renderItem={renderProject}
           ListEmptyComponent={ListEmptyComponent}
           onEndReachedThreshold={0.2}
-          onEndReached={() => {
-            const isFiltering =
-              searchText.trim().length || selectedFilter !== 'ALL';
-            if (isFiltering && hasMore) {
-              loadSearchData(true);
-            } else if (hasMore) {
-              loadData();
-            }
-          }}
-          ListFooterComponent={() =>
-            hasMore && <BaseIndicator />
-          }
+          onEndReached={() => hasMore && loadData()}
+          ListFooterComponent={() => hasMore && <BaseIndicator />}
           ListHeaderComponent={ListHeaderComponent}
           refreshing={isRefreshing}
           onRefresh={onRefresh}

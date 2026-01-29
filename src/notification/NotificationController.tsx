@@ -5,6 +5,7 @@ import { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 
 import { messagingApp } from '../firebase';
 import { navigationRef } from '../navigations/RootNavigator';
+import { NotificationDataType } from '../utils/helperFunctions';
 
 const NotificationController = ({ children }: ViewProps) => {
   useEffect(() => {
@@ -15,7 +16,7 @@ const NotificationController = ({ children }: ViewProps) => {
           break;
         case EventType.PRESS:
           console.log('User pressed notification', event.detail.notification);
-          handleNavigation(event.detail.notification?.data);
+          handleNavigation(event.detail.notification?.data as NotificationDataType);
           break;
       }
     });
@@ -29,13 +30,13 @@ const NotificationController = ({ children }: ViewProps) => {
     const unsubscribe = messagingApp.onNotificationOpenedApp(remoteMessage => {
       // open notification from bg
       console.log('onNotificationOpenedApp: ', { remoteMessage });
-      handleNavigation(remoteMessage.data);
+      handleNavigation(remoteMessage.data as NotificationDataType);
     });
 
     messagingApp.getInitialNotification().then(remoteMessage => {
       // open notification from killed
       console.log('messagingApp getInitialNotification: ', { remoteMessage });
-      handleNavigation(remoteMessage?.data);
+      handleNavigation(remoteMessage?.data as NotificationDataType);
     });
 
     return () => {
@@ -77,10 +78,7 @@ const NotificationController = ({ children }: ViewProps) => {
     });
   };
 
-  const handleNavigation = (data?: {
-    project_id?: string;
-    task_id?: string;
-  }) => {
+  const handleNavigation = (data?: NotificationDataType) => {
     if (data?.project_id) {
       navigationRef.current?.navigate('Drawer', {
         screen: 'ProjectStack',

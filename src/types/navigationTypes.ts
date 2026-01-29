@@ -1,5 +1,5 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
-import { ProjectType, TaskType } from './appTypes';
+import { TaskType } from './appTypes';
 
 export type RootStackNavigatorType = {
   Login: { forSignUp?: boolean };
@@ -9,7 +9,7 @@ export type RootStackNavigatorType = {
 export type DrawerNavigatorType = {
   ProjectStack: NavigatorScreenParams<ProjectStackNavigatorType>;
   TaskStack: NavigatorScreenParams<TaskStackNavigatorType>;
-  Member: undefined;
+  MemberStack: NavigatorScreenParams<MemberStackNavigatorType>;
   Profile: undefined;
 };
 
@@ -24,10 +24,15 @@ export type ProjectStackNavigatorType = {
 };
 
 export type TaskStackNavigatorType = {
-  Task: { seeArchive?: boolean; projectId?: string } | undefined;
+  Task: { projectId?: string } | undefined;
   TaskDetail: { id: string };
   TaskForm: {
     projectId?: string;
     task?: TaskType;
   };
+};
+
+export type MemberStackNavigatorType = {
+  Member: undefined;
+  MemberDetail: { id: string };
 };

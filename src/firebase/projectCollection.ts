@@ -50,7 +50,7 @@ export const updateProject = async (
 };
 
 interface NotifyMemberParamType {
-  type: 'add' | 'update';
+  type: 'add' | 'update' | 'delete' | 'archive' | 'restore';
   project: Partial<ProjectType>;
   newMemberIds?: string[];
   removedMemberIds?: string[];
@@ -58,7 +58,7 @@ interface NotifyMemberParamType {
   oldPmId?: string;
   isStatusChanged?: boolean;
 }
-// notify member about project
+// notify member about project add and update
 export const notifyMemberForProject = async ({
   type,
   newMemberIds,
@@ -89,16 +89,47 @@ export const notifyMemberForProject = async ({
     user_id: '',
   };
   const notificationList: BodyDataType[] = [];
+  const currentUser = store.getState().AuthReducer.user?.id; // admin / current user / project.created_by
 
-  if (type === 'add') {
+  if (type === 'delete' || type === 'archive' || type === 'restore') {
+    // archive or delete project : notify to members of project, no admin
+    project.member_list?.forEach(mId => {
+      defaultNotificationData.user_id = mId;
+      if (mId !== currentUser) {
+        switch (type) {
+          case 'delete':
+            defaultNotificationData.title = 'Project deleted';
+            defaultNotificationData.data.type =
+              NotificationTypeEnum.DELETE_PROJECT;
+            defaultNotificationData.body = `${project.title} project is deleted by admin`;
+            break;
+
+          case 'archive':
+            defaultNotificationData.title = 'Project archived';
+            defaultNotificationData.data.type =
+              NotificationTypeEnum.ARCHIVE_PROJECT;
+            defaultNotificationData.body = `${project.title} project is archived by admin`;
+            break;
+
+          case 'restore':
+            defaultNotificationData.title = 'Project restored';
+            defaultNotificationData.data.type =
+              NotificationTypeEnum.RESTORE_PROJECT;
+            defaultNotificationData.body = `${project.title} project is restored by admin`;
+            break;
+        }
+
+        notificationList.push({ ...defaultNotificationData });
+      }
+    });
+  } else if (type === 'add') {
     defaultNotificationData.title = 'New Project added';
     defaultNotificationData.data.type = NotificationTypeEnum.ADD_NEW_PROJECT;
 
     const projectManagerId = project?.project_manager?.at(0);
     // all member (no admin)
     const onlyMemberList = project.member_list?.filter(
-      id =>
-        id !== store.getState().AuthReducer.user?.id && id !== projectManagerId,
+      id => id !== currentUser && id !== projectManagerId,
     );
     // pm : you added in project as pm
     if (projectManagerId) {
@@ -173,9 +204,7 @@ export const notifyMemberForProject = async ({
     // only to old members, no new member needed to notify
     // oldMemberList = existing - new
     const existingMemberList = project.member_list?.filter(
-      id =>
-        !newMemberIds?.includes(id) &&
-        id !== store.getState().AuthReducer.user?.id,
+      id => !newMemberIds?.includes(id) && id !== currentUser,
     );
 
     if (isStatusChanged) {
@@ -201,8 +230,6 @@ export const notifyMemberForProject = async ({
     notificationList.forEach(notification => {
       sendNotification({ ...notification });
     });
-
-  return;
 };
 
 // fetch single project

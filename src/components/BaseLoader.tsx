@@ -1,12 +1,12 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, ViewProps, ViewStyle } from 'react-native';
 import React, { memo } from 'react';
 
 import appColors from '../styles/appColors';
 import BaseIndicator from './BaseIndicator';
 
-const BaseLoader = () => {
+const BaseLoader = (props: ViewProps) => {
   return (
-    <View style={styles.indicatorContainer}>
+    <View {...props} style={[styles.indicatorContainer, props.style]}>
       <BaseIndicator />
     </View>
   );

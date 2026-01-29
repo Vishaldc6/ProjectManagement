@@ -1,7 +1,7 @@
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import React, { useEffect, useState } from 'react';
 
-import { MemberListScreen } from '../screens/admin';
+import MemberStackNavigation from './MemberStackNavigation';
 import ProjectStackNavigator from './ProjectStackNavigator';
 import { DrawerNavigatorType } from '../types/navigationTypes';
 import { useAppSelector } from '../hooks/reduxHooks';
@@ -11,14 +11,12 @@ import { requestUserPermission } from '../utils/helperFunctions';
 import { messagingApp } from '../firebase';
 import { updateUser } from '../firebase/userCollection';
 import ProfileScreen from '../screens/ProfileScreen';
+import { RolesType } from '../types/appTypes';
 
 const Drawer = createDrawerNavigator<DrawerNavigatorType>();
 
 const DrawerNavigator = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
-
-  const [initialRouteName, setInitialRouteName] =
-    useState<keyof DrawerNavigatorType>('ProjectStack');
 
   useEffect(() => {
     requestUserPermission()
@@ -38,7 +36,7 @@ const DrawerNavigator = () => {
 
   return (
     <Drawer.Navigator
-      initialRouteName={initialRouteName}
+      initialRouteName={'ProjectStack'}
       screenOptions={{ popToTopOnBlur: true }}
       drawerContent={props => <DrawerContainer {...props} />}
     >
@@ -58,14 +56,14 @@ const DrawerNavigator = () => {
         }}
         component={TaskStackNavigator}
       />
-      {user?.role === 'Admin' && (
+      {user?.role === RolesType.Admin && (
         <Drawer.Screen
-          name="Member"
+          name="MemberStack"
           options={{
             drawerLabel: 'Members',
             title: 'Members',
           }}
-          component={MemberListScreen}
+          component={MemberStackNavigation}
         />
       )}
       <Drawer.Screen

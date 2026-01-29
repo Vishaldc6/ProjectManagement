@@ -1,6 +1,7 @@
 import { RouteProp, useRoute } from '@react-navigation/native';
 import {
   DrawerNavigatorType,
+  MemberStackNavigatorType,
   ProjectStackNavigatorType,
   RootStackNavigatorType,
   TaskStackNavigatorType,
@@ -9,7 +10,8 @@ import {
 type RootType = RootStackNavigatorType &
   DrawerNavigatorType &
   ProjectStackNavigatorType &
-  TaskStackNavigatorType;
+  TaskStackNavigatorType &
+  MemberStackNavigatorType;
 
 export const useAppRoutes = <screenName extends keyof RootType>() => {
   return useRoute<RouteProp<RootType, screenName>>();

@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
@@ -14,7 +14,13 @@ import {
 import uuid from 'react-native-uuid';
 import { useFormik } from 'formik';
 import * as yup from 'yup';
-import { getDocs, or, query, where } from '@react-native-firebase/firestore';
+import {
+  and,
+  getDocs,
+  or,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
 
 import {
   BaseButton,
@@ -28,20 +34,40 @@ import {
   MemberType,
   ProjectStatusType,
   ProjectType,
+  RolesType,
   UserType,
 } from '../../types/appTypes';
 import {
   addProject,
+  fetchProjectMembers,
+  fetchSingleProject,
   notifyMemberForProject,
+  updateProject,
 } from '../../firebase/projectCollection';
 import { userRef } from '../../firebase/userCollection';
 import { useAppNavigation } from '../../hooks/useAppNavigation';
 import appFonts from '../../styles/appFonts';
 import { useAppSelector } from '../../hooks/reduxHooks';
+import { useAppRoutes } from '../../hooks/useAppRoute';
+import { debounce, toCapitalize } from '../../utils/helperFunctions';
+
+const STATUS_LIST = [
+  ProjectStatusType.ACTIVE,
+  ProjectStatusType.IN_ACTIVE,
+  ProjectStatusType.COMPLETED,
+];
 
 const ProjectFormScreen = () => {
   const { user } = useAppSelector(state => state.AuthReducer);
+  const { params } = useAppRoutes<'ProjectForm'>();
   const navigation = useAppNavigation('ProjectForm');
+
+  const isUpdateMode = useMemo(() => !!params?.id, [params]);
+
+  const [currentStatus, setCurrentStatus] = useState<ProjectStatusType>(
+    ProjectStatusType.ACTIVE,
+  );
+  const [project, setProject] = useState<ProjectType>();
   const [addedMemberList, setAddedMemberList] = useState<MemberType[]>(
     user ? [user] : [],
   );
@@ -88,6 +114,7 @@ const ProjectFormScreen = () => {
     handleChange,
     setFieldValue,
     setFieldTouched,
+    setValues,
   } = useFormik<InitialValueType>({
     initialValues: {
       title: '',
@@ -103,30 +130,58 @@ const ProjectFormScreen = () => {
     },
   });
 
-  // --- NEED TO FIX ---
   useEffect(() => {
-    debouncedFunc();
-  }, [values.searchMember]);
+    if (params?.id) {
+      setIsLoading(true);
+      fetchSingleProject(params?.id)
+        .then(_project => {
+          setProject(_project);
+          fetchProjectMembers(_project)
+            .then(members => {
+              setAddedMemberList(members);
+              setCurrentStatus(_project.status);
+              setValues({
+                clientName: _project.client_name,
+                description: _project.description,
+                members: _project.member_list,
+                searchMember: '',
+                title: _project.title,
+                project_manager: members.find(
+                  ({ role }) => role === RolesType.Project_Manager,
+                ),
+              });
+              setIsLoading(false);
+            })
+            .catch(() => {
+              setIsLoading(false);
+              Alert.alert('Project', 'Something went wrong');
+            });
+        })
+        .catch(() => {
+          setIsLoading(false);
+          Alert.alert('Project', 'Something went wrong');
+        });
+    }
+  }, [params]);
 
-  const debounce = (func: any, time: number) => {
-    let timeOut: number;
-    return function () {
-      clearTimeout(timeOut);
-      timeOut = setTimeout(() => {
-        func();
-      }, time);
-    };
-  };
-
-  const searchMemberFunc = () => {
-    const searchText = values.searchMember.toLowerCase();
+  const searchMemberFunc = (text: string) => {
+    const searchText = text.trim().toLowerCase();
     if (searchText) {
       setIsSearchLoading(true);
-      console.log('searchMember...');
+
       const q = query(
         userRef,
         where('role', '!=', 'Admin'),
-        or(where('name', '==', searchText), where('email', '==', searchText)),
+        or(
+          and(
+            where('name', '>=', searchText.trim().toLowerCase()),
+            where('name', '<=', searchText.trim().toLowerCase() + '\uf8ff'),
+          ),
+          and(
+            where('email', '>=', searchText.trim().toLowerCase()),
+            where('email', '<=', searchText.trim().toLowerCase() + '\uf8ff'),
+          ),
+        ),
       );
       console.log({ q });
 
@@ -136,24 +191,65 @@ const ProjectFormScreen = () => {
           _memberList.push(doc.data());
         });
         setMemberList(_memberList);
-        console.log({ _memberList });
         setIsSearchLoading(false);
-
-        // setFieldValue('members', [user?.id]);
       });
+    } else {
+      setMemberList([]);
+      setIsSearchLoading(false);
     }
   };
 
-  const debouncedFunc = debounce(searchMemberFunc, 2000);
+  const debouncedFunc = useCallback(debounce(searchMemberFunc, 2000), []);
+
+  const isDataChanged = () => {
+    const isSameLength = values.members.length === project?.member_list.length;
+    const areSameMembers = values.members.every(m =>
+      project?.member_list.includes(m),
+    );
+    const isMemberListChanged = !(isSameLength && areSameMembers);
+
+    if (
+      values.clientName.trim().toLowerCase() !== project?.client_name.trim() ||
+      values.description.trim() !== project?.description.trim() ||
+      values.title.trim().toLowerCase() !== project?.title.trim() ||
+      values.project_manager?.id !== project?.project_manager[0] ||
+      currentStatus !== project.status ||
+      isMemberListChanged
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  // returns new and old member ids and pm ids
+  const getChangedMemberData = () => {
+    const newMember = values.members.filter(
+      id => !project?.member_list.includes(id),
+    );
+    const oldMember = project?.member_list.filter(
+      id => !values.members.includes(id),
+    );
+
+    let oldPmId, newPmId;
+    if (values.project_manager?.id !== project?.project_manager[0]) {
+      oldPmId = project?.project_manager[0];
+      newPmId = values.project_manager?.id;
+    }
+    return {
+      oldPmId,
+      newPmId,
+      newMemberIds: newMember,
+      removedMemberIds: oldMember,
+    };
+  };
 
   const handleSaveProject = async () => {
     setIsLoading(true);
-    const uid = uuid.v4();
     const projectData: ProjectType = {
+      id: project?.id ?? '',
       client_name: values.clientName.toLowerCase(),
-      id: uid,
       description: values.description,
-      status: ProjectStatusType.ACTIVE,
+      status: currentStatus,
       title: values.title.toLowerCase(),
       member_list: values.members,
       created_by: user?.id,
@@ -163,21 +259,56 @@ const ProjectFormScreen = () => {
     };
     console.log({ projectData });
 
-    addProject(uid, projectData)
-      .then(async () => {
-        // just notify members
-        await notifyMemberForProject({
-          memberIds: values.members,
-          project: projectData,
+    if (isUpdateMode) {
+      if (isDataChanged()) {
+        console.log('changes... so update');
+        updateProject(project?.id ?? '', projectData)
+          .then(async () => {
+            console.log({
+              type: 'update',
+              project: projectData,
+              ...getChangedMemberData(),
+              isStatusChanged: currentStatus !== project?.status,
+            });
+
+            // notify members : add/removed, status update
+            await notifyMemberForProject({
+              type: 'update',
+              project: projectData,
+              ...getChangedMemberData(),
+              isStatusChanged: currentStatus !== project?.status,
+            });
+            setIsLoading(false);
+            navigation.goBack();
+          })
+          .catch(error => {
+            setIsLoading(false);
+            console.log({ error });
+            Alert.alert('Update Project', 'Something went wrong!');
+          });
+      }
+    } else {
+      // add
+      const uid = uuid.v4();
+      projectData.id = uid;
+      console.log('adding new doc...');
+      addProject(uid, projectData)
+        .then(async () => {
+          // just notify members
+          await notifyMemberForProject({
+            type: 'add',
+            project: projectData,
+          });
+          setIsLoading(false);
+          navigation.goBack();
+        })
+        .catch(error => {
+          setIsLoading(false);
+          console.log({ error });
+          Alert.alert('Add Project', 'Something went wrong!');
         });
-        setIsLoading(false);
-        navigation.goBack();
-      })
-      .catch(error => {
-        setIsLoading(false);
-        console.log({ error });
-        Alert.alert('Add Project', 'Something went wrong!');
-      });
+    }
+    setIsLoading(false);
   };
 
   const handleSelection = (mId: string) => {
@@ -189,10 +320,33 @@ const ProjectFormScreen = () => {
     setFieldValue('members', filter);
   };
 
+  useEffect(() => {
+    const foundAt = addedMemberList.findIndex(
+      ({ id }) => id === values.project_manager?.id,
+    );
+    foundAt === -1 && setFieldValue('project_manager', '');
+  }, [addedMemberList]);
+
   const renderItem = ({ item }: { item: MemberType }) => {
     const isPM = values.project_manager?.id === item.id;
     return (
       <View style={styles.memberProfileContainer}>
+        {item.role !== RolesType.Admin && (
+          <BaseIcon
+            name="CircleMinus"
+            style={styles.removeMemberIcon}
+            size={appFonts.FONT_16}
+            color={appColors.DANGER_TEXT}
+            onPress={() => {
+              // manage formik value
+              handleSelection(item.id);
+              // manage list
+              setAddedMemberList(prev =>
+                prev.filter(({ id }) => item.id !== id),
+              );
+            }}
+          />
+        )}
         <TouchableOpacity
           onPress={() => setFieldValue('project_manager', item)}
           activeOpacity={0.8}
@@ -226,7 +380,39 @@ const ProjectFormScreen = () => {
     );
   };
 
-  const ListEmptyComponent = memo(() => <Text>{'Members not found'}</Text>);
+  const renderSearchedMember = ({ item }: { item: UserType }) => {
+    const isAdded = addedMemberList.find(({ id }) => id === item.id);
+    return (
+      <View style={styles.searchedMemberCard}>
+        <View style={{ flex: 1 }}>
+          <Text>{item.name}</Text>
+          <Text>{item.email}</Text>
+        </View>
+        <BaseIcon
+          name={isAdded ? 'Check' : 'Plus'}
+          color={appColors.PRIMARY}
+          onPress={() => {
+            // manage formik value
+            handleSelection(item.id);
+            // manage list
+            setAddedMemberList(prev =>
+              isAdded
+                ? prev.filter(({ id }) => item.id !== id)
+                : [...prev, item],
+            );
+          }}
+        />
+      </View>
+    );
+  };
+
+  const SearchedMemberListEmptyComponent = memo(() => (
+    <Text>
+      {values.searchMember
+        ? 'Members not found'
+        : 'Add members by search their name or email'}
+    </Text>
+  ));
 
   const ListHeaderComponent = memo(() => {
     return (
@@ -249,12 +435,38 @@ const ProjectFormScreen = () => {
   });
 
   const toggleModal = () => {
+    setFieldValue('searchMember', '');
+    setMemberList([]);
     setMemberModal(!memberModal);
   };
 
   return (
     <View style={styles.container}>
       {isLoading && <BaseLoader />}
+
+      {isUpdateMode && (
+        <View>
+          <Text style={styles.fieldTitle}>{'Status'}</Text>
+          <View style={{ flexDirection: 'row', gap: wp(3), marginTop: hp(1) }}>
+            {STATUS_LIST.map(status => {
+              const isSelected = status === currentStatus;
+
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setCurrentStatus(status)}
+                  style={[
+                    styles.statusContainer,
+                    isSelected && styles.selectedStatusContainer,
+                  ]}
+                >
+                  <Text>{toCapitalize(status)}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
       <BaseInput
         title="Project Title"
         required
@@ -325,68 +537,37 @@ const ProjectFormScreen = () => {
           setFieldTouched('project_manager', true);
           handleSubmit();
         }}
-        style={{
-          marginVertical: hp(2),
-        }}
+        style={{ marginVertical: hp(2) }}
       />
       <BaseModal
         visible={memberModal}
         onRequestClose={toggleModal}
         modalTitle={'Add new member'}
+        modalContainerStyle={{ height: hp(50) }}
       >
         <BaseInput
           placeholder="Search member by name or email"
           value={values.searchMember}
-          onChangeText={handleChange('searchMember')}
+          onChangeText={val => {
+            !isSearchLoading && setIsSearchLoading(!isSearchLoading);
+            debouncedFunc(val);
+            handleChange('searchMember')(val);
+          }}
         />
 
-        {isSearchLoading ? (
-          <BaseLoader />
-        ) : (
-          <FlatList
-            data={memberList}
-            renderItem={({ item }) => {
-              const isAdded = addedMemberList.find(({ id }) => id === item.id);
-              return (
-                <View
-                  style={{
-                    padding: wp(1),
-                    borderWidth: StyleSheet.hairlineWidth,
-                    borderRadius: wp(2),
-                    marginBottom: hp(1),
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                  }}
-                >
-                  <View
-                    style={{
-                      flex: 1,
-                    }}
-                  >
-                    <Text>{item.name}</Text>
-                    <Text>{item.email}</Text>
-                  </View>
-                  <BaseIcon
-                    name={isAdded ? 'Check' : 'Plus'}
-                    color={appColors.PRIMARY}
-                    onPress={() => {
-                      // manage formik value
-                      handleSelection(item.id);
-
-                      // manage list
-                      setAddedMemberList(prev =>
-                        isAdded
-                          ? prev.filter(({ id }) => item.id !== id)
-                          : [...prev, item],
-                      );
-                    }}
-                  />
-                </View>
-              );
-            }}
-            ListEmptyComponent={ListEmptyComponent}
-          />
-        )}
+        <View style={{ flex: 1 }}>
+          {isSearchLoading ? (
+            <BaseLoader
+              style={{ backgroundColor: appColors.SECONDARY_BACKGROUND }}
+            />
+          ) : (
+            <FlatList
+              data={memberList}
+              renderItem={renderSearchedMember}
+              ListEmptyComponent={SearchedMemberListEmptyComponent}
+            />
+          )}
+        </View>
       </BaseModal>
     </View>
   );
@@ -408,9 +589,15 @@ const styles = StyleSheet.create({
     color: appColors.PRIMARY,
   },
   memberProfileContainer: {
-    maxWidth: wp(18),
+    width: wp(18),
     alignItems: 'center',
     marginRight: wp(1),
+  },
+  removeMemberIcon: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 99,
   },
   memberProfile: {
     width: wp(15),
@@ -430,5 +617,27 @@ const styles = StyleSheet.create({
   },
   errorMessage: {
     color: appColors.ERROR_TEXT,
+  },
+  searchedMemberCard: {
+    padding: wp(1),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: wp(2),
+    marginBottom: hp(1),
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    borderWidth: 1,
+    padding: wp(1),
+    paddingHorizontal: wp(3),
+    gap: wp(1),
+    borderRadius: wp(5),
+  },
+  selectedStatusContainer: {
+    borderColor: appColors.PRIMARY,
+    backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
   },
 });

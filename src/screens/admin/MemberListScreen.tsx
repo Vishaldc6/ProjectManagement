@@ -6,92 +6,179 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  heightPercentageToDP,
-  widthPercentageToDP,
+  heightPercentageToDP as hp,
+  widthPercentageToDP as wp,
 } from 'react-native-responsive-screen';
-import { onSnapshot, query, where } from '@react-native-firebase/firestore';
+import {
+  FirebaseFirestoreTypes,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  where,
+} from '@react-native-firebase/firestore';
 
 import appColors from '../../styles/appColors';
-import { MemberType } from '../../types/appTypes';
+import { MemberType, ProjectType, RolesType } from '../../types/appTypes';
 import appFonts from '../../styles/appFonts';
 import { userRef } from '../../firebase/userCollection';
-import { BaseIcon, BaseLoader } from '../../components';
+import { BaseIcon, BaseIndicator, BaseLoader } from '../../components';
+import { projectRef } from '../../firebase/projectCollection';
+import { useAppSelector } from '../../hooks/reduxHooks';
+import { useAppNavigation } from '../../hooks/useAppNavigation';
+import { ROLE_LIST } from '../../constants';
+
+interface IdListType {
+  memberIdList: string[];
+  managerIdList: string[];
+}
 
 const MemberListScreen = () => {
-  const [memberList, setMemberList] = useState<MemberType[]>([]);
-  const [filterMemberList, setFilterMemberList] = useState<MemberType[]>([]);
-  const [roleList, setRoleList] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const navigation = useAppNavigation('Member');
+  const { user } = useAppSelector(state => state.AuthReducer);
 
+  const [idListData, setIdListData] = useState<IdListType>({
+    memberIdList: [],
+    managerIdList: [],
+  });
+  const [memberList, setMemberList] = useState<MemberType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [lastDoc, setLastDoc] =
+    useState<FirebaseFirestoreTypes.QueryDocumentSnapshot>();
   const [selectedRole, setSelectedRole] = useState('All');
 
+  const roleList = useMemo(() => {
+    return ['All', ...ROLE_LIST.filter(role => role !== RolesType.Admin)];
+  }, []);
+
+  const MEMBER_PAGE_LIMIT = 10;
+
   useEffect(() => {
-    const q = query(userRef, where('role', '!=', 'Admin'));
-
-    const unsubscribe = onSnapshot(q, querySnapshot => {
-      const _memberList: MemberType[] = [];
-      querySnapshot.forEach((doc: any) => {
-        _memberList.push(doc.data());
-      });
-      setMemberList(_memberList);
-      setFilterMemberList(_memberList);
-      setRoleList([
-        'All',
-        ...new Set(_memberList.map(({ role }) => role ?? '')),
-      ]);
-      setIsLoading(false);
-    });
-
-    return () => {
-      unsubscribe();
-    };
+    fetchAllProjects();
   }, []);
 
   useEffect(() => {
-    setFilterMemberList(
-      selectedRole === 'All'
-        ? memberList
-        : memberList.filter(
-            ({ role }) => role?.toLowerCase() === selectedRole.toLowerCase(),
-          ),
+    fetchMembers();
+  }, [selectedRole, idListData]);
+
+  const fetchAllProjects = async () => {
+    let q = query(
+      projectRef,
+      where('is_archived', '==', false),
+      where('is_deleted', '==', false),
+      where('created_by', '==', user?.id),
     );
-  }, [selectedRole]);
+
+    const unique_memberList = new Set<string>();
+    const unique_managerList = new Set<string>();
+
+    await getDocs(q).then(snapshots => {
+      snapshots?.forEach((doc: any) => {
+        const project = doc.data() as ProjectType;
+        project.member_list.forEach(id => unique_memberList.add(id));
+        project.project_manager.forEach(id => unique_managerList.add(id));
+      });
+    });
+    unique_memberList.delete(user?.id ?? '');
+
+    setIdListData({
+      memberIdList: [...unique_memberList],
+      managerIdList: [...unique_managerList],
+    });
+  };
+
+  const fetchMembers = async (next = false) => {
+    const { managerIdList, memberIdList } = idListData;
+
+    const members: MemberType[] = [];
+
+    if (memberIdList.length) {
+      let member_q = query(
+        userRef,
+        where(
+          'id',
+          'in',
+          selectedRole === RolesType.Project_Manager
+            ? managerIdList
+            : memberIdList,
+        ),
+        orderBy('name'),
+        limit(MEMBER_PAGE_LIMIT),
+      );
+
+      if (!['All', RolesType.Project_Manager].includes(selectedRole)) {
+        member_q = query(member_q, where('role', '==', selectedRole));
+      }
+
+      if (lastDoc && next) {
+        member_q = member_q.startAfter(lastDoc);
+      }
+
+      await getDocs(member_q)
+        .then(snapshots => {
+          snapshots.forEach((doc: any) => {
+            const m = doc.data() as MemberType;
+            if (managerIdList.includes(m.id)) {
+              m.role = RolesType.Project_Manager;
+            }
+            members.push(m);
+          });
+          setLastDoc(snapshots.docs.at(-1));
+          setHasMore(members.length >= MEMBER_PAGE_LIMIT);
+          setMemberList(prev => (next ? [...prev, ...members] : members));
+          setIsLoading(false);
+          setIsRefreshing(false);
+        })
+        .catch(error => {
+          console.log({ error });
+          setLastDoc(undefined);
+          setHasMore(false);
+          setMemberList([]);
+          setIsLoading(false);
+          setIsRefreshing(false);
+        });
+    }
+  };
+
+  const onRefresh = () => {
+    setIsRefreshing(true);
+    setSelectedRole('All');
+    fetchMembers();
+  };
 
   const renderItem = ({ item: member }: { item: MemberType }) => {
     const memberRole =
-      member.role === 'Project Manager'
-        ? appColors.MEMBER_PROJECT_MANAGER
-        : member.role === 'Developer'
-        ? appColors.MEMBER_DEV
-        : member.role === 'Mobile Developer'
-        ? appColors.MEMBER_MOB_DEV
-        : member.role === 'Web Developer'
-        ? appColors.MEMBER_WEB_DEV
-        : member.role === 'QA'
-        ? appColors.MEMBER_QA
-        : member.role === 'UI/UX'
-        ? appColors.MEMBER_UI
-        : appColors.MEMBER_ADMIN;
-
-    const memberBG =
-      member.role === 'Project Manager'
-        ? appColors.MEMBER_PROJECT_MANAGER_BG
-        : member.role === 'Developer'
-        ? appColors.MEMBER_DEV_BG
-        : member.role === 'Mobile Developer'
-        ? appColors.MEMBER_MOB_DEV_BG
-        : member.role === 'Web Developer'
-        ? appColors.MEMBER_WEB_DEV_BG
-        : member.role === 'QA'
-        ? appColors.MEMBER_QA_BG
-        : member.role === 'UI/UX'
-        ? appColors.MEMBER_UI_BG
-        : appColors.MEMBER_ADMIN_BG;
+      member.role === RolesType.Project_Manager
+        ? {
+            color: appColors.MEMBER_PROJECT_MANAGER,
+            bg: appColors.MEMBER_PROJECT_MANAGER_BG,
+          }
+        : member.role === RolesType.Developer
+        ? { color: appColors.MEMBER_DEV, bg: appColors.MEMBER_DEV_BG }
+        : member.role === RolesType.Mobile_Developer
+        ? { color: appColors.MEMBER_MOB_DEV, bg: appColors.MEMBER_MOB_DEV_BG }
+        : member.role === RolesType.Web_Developer
+        ? { color: appColors.MEMBER_WEB_DEV, bg: appColors.MEMBER_WEB_DEV_BG }
+        : member.role === RolesType.QA
+        ? { color: appColors.MEMBER_QA, bg: appColors.MEMBER_QA_BG }
+        : member.role === RolesType.UI_UX
+        ? { color: appColors.MEMBER_UI, bg: appColors.MEMBER_UI_BG }
+        : { color: appColors.MEMBER_ADMIN, bg: appColors.MEMBER_ADMIN_BG };
 
     return (
-      <TouchableOpacity activeOpacity={0.8} style={styles.memberCard}>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        style={styles.memberCard}
+        onPress={() =>
+          navigation.navigate('MemberDetail', {
+            id: member.id,
+          })
+        }
+      >
         <View style={styles.profileContainer}>
           <BaseIcon
             name="User"
@@ -107,58 +194,70 @@ const MemberListScreen = () => {
             {member.email}
           </Text>
         </View>
-        <View style={[styles.roleContainer, { backgroundColor: memberBG }]}>
-          <Text style={[styles.role, { color: memberRole }]}>
-            {member.role}
-          </Text>
+        <View
+          style={[styles.roleContainer, { backgroundColor: memberRole.bg }]}
+        >
+          <Text style={{ color: memberRole.color }}>{member.role}</Text>
         </View>
       </TouchableOpacity>
     );
   };
 
+  const ListEmptyComponent = () => (
+    <View style={styles.emptyContainer}>
+      <Text>{'Members not found!'}</Text>
+    </View>
+  );
+
+  const ListFooterComponent = () => {
+    return hasMore && <BaseIndicator />;
+  };
+
   return (
     <View style={styles.container}>
       {isLoading && <BaseLoader />}
-      <ScrollView
-        showsHorizontalScrollIndicator={false}
-        horizontal
-        style={{ marginVertical: heightPercentageToDP(1) }}
-        contentContainerStyle={{
-          gap: widthPercentageToDP(2),
-          paddingHorizontal: widthPercentageToDP(3),
-        }}
-      >
-        {roleList.map(role => {
-          return (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={[
-                styles.filerRoleContainer,
-                selectedRole === role && styles.selectedRoleContainer,
-              ]}
-              onPress={() => setSelectedRole(role)}
-            >
-              <Text
+      <View>
+        <ScrollView
+          showsHorizontalScrollIndicator={false}
+          horizontal
+          style={{ marginVertical: hp(1) }}
+          contentContainerStyle={styles.roleScrollContainer}
+        >
+          {roleList.map(role => {
+            return (
+              <TouchableOpacity
+                activeOpacity={0.8}
                 style={[
-                  styles.filterRole,
-                  selectedRole === role && styles.selectedFilterRole,
+                  styles.filerRoleContainer,
+                  selectedRole === role && styles.selectedRoleContainer,
                 ]}
+                onPress={() => setSelectedRole(role)}
               >
-                {role}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+                <Text
+                  style={[
+                    styles.filterRole,
+                    selectedRole === role && styles.selectedFilterRole,
+                  ]}
+                >
+                  {role}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
-      <FlatList
-        data={filterMemberList}
-        renderItem={renderItem}
-        contentContainerStyle={{
-          paddingHorizontal: widthPercentageToDP(3),
-          paddingBottom: heightPercentageToDP(10),
-        }}
-      />
+        <FlatList
+          data={memberList}
+          renderItem={renderItem}
+          contentContainerStyle={styles.memberListContainer}
+          ListEmptyComponent={ListEmptyComponent}
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          onEndReachedThreshold={0.2}
+          onEndReached={() => hasMore && fetchMembers(true)}
+          ListFooterComponent={ListFooterComponent}
+        />
+      </View>
     </View>
   );
 };
@@ -166,12 +265,16 @@ const MemberListScreen = () => {
 export default MemberListScreen;
 
 const styles = StyleSheet.create({
-  container: {},
+  container: { flex: 1 },
+  roleScrollContainer: {
+    gap: wp(2),
+    paddingHorizontal: wp(3),
+  },
   filerRoleContainer: {
     borderWidth: 1,
-    paddingVertical: widthPercentageToDP(1),
-    paddingHorizontal: widthPercentageToDP(4),
-    borderRadius: widthPercentageToDP(5),
+    paddingVertical: wp(1),
+    paddingHorizontal: wp(4),
+    borderRadius: wp(5),
   },
   selectedRoleContainer: {
     backgroundColor: 'black',
@@ -182,26 +285,30 @@ const styles = StyleSheet.create({
   selectedFilterRole: {
     color: 'white',
   },
+  memberListContainer: {
+    paddingHorizontal: wp(3),
+    paddingBottom: hp(10),
+  },
   memberCard: {
     backgroundColor: appColors.PRIMARY_BACKGROUND,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: widthPercentageToDP(2),
+    gap: wp(2),
     elevation: 3,
-    borderRadius: widthPercentageToDP(3),
-    marginVertical: heightPercentageToDP(1),
-    padding: widthPercentageToDP(3),
+    borderRadius: wp(3),
+    marginVertical: hp(1),
+    padding: wp(3),
   },
   profileContainer: {
-    height: widthPercentageToDP(15),
-    width: widthPercentageToDP(15),
-    borderRadius: widthPercentageToDP(15),
+    height: wp(15),
+    width: wp(15),
+    borderRadius: wp(15),
     backgroundColor: appColors.PRIMARY_LIGHT_BACKGROUND,
     alignItems: 'center',
     justifyContent: 'center',
   },
   detailContainer: {
-    gap: heightPercentageToDP(0.5),
+    gap: hp(0.5),
     flex: 1,
   },
   name: {
@@ -213,10 +320,13 @@ const styles = StyleSheet.create({
   },
   roleContainer: {
     alignSelf: 'center',
-    backgroundColor: 'red',
-    paddingVertical: widthPercentageToDP(1),
-    paddingHorizontal: widthPercentageToDP(2),
-    borderRadius: widthPercentageToDP(1.5),
+    paddingVertical: wp(1),
+    paddingHorizontal: wp(2),
+    borderRadius: wp(1.5),
   },
-  role: {},
+  emptyContainer: {
+    height: hp(80),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });

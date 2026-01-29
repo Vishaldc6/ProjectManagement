@@ -52,6 +52,16 @@ export const fetchFromStorage = async (key: string) => {
   return result;
 };
 
+export const debounce = (func: any, time: number) => {
+  let timeOut: number;
+  return (...args: any) => {
+    clearTimeout(timeOut);
+    timeOut = setTimeout(() => {
+      func(...args);
+    }, time);
+  };
+};
+
 // request user for notification permission
 export async function requestUserPermission() {
   if (!messagingApp.isDeviceRegisteredForRemoteMessages) {
@@ -90,6 +100,9 @@ export async function requestUserPermission() {
 export enum NotificationTypeEnum {
   ADD_NEW_PROJECT = 'ADD_NEW_PROJECT',
   REMOVE_PROJECT = 'REMOVE_PROJECT',
+  DELETE_PROJECT = 'DELETE_PROJECT',
+  ARCHIVE_PROJECT = 'ARCHIVE_PROJECT',
+  RESTORE_PROJECT = 'RESTORE_PROJECT',
   STATUS_CHANGE = 'STATUS_CHANGE',
   PM_REVOKE = 'PM_REVOKE',
   PM_ASSIGN = 'PM_ASSIGN',
